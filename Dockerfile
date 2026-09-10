@@ -51,6 +51,7 @@ RUN mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools" \
     && sdkmanager --install \
         "platform-tools" \
         "platforms;${ANDROID_PLATFORM}" \
+        "platforms;${ANDROID_PLATFORM_FALLBACK}" \
         "build-tools;${ANDROID_BUILD_TOOLS}" > /dev/null
 
 # Warm the SDK caches so the first real command is not a download.

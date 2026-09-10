@@ -22,6 +22,9 @@ services:
       # a host-side Flutter install.
       - build:/app/build
       - dart-tool:/app/.dart_tool
+      # ...except the outputs, which are the point of the build. Without this
+      # the APK is written into the named volume and never reaches the host.
+      - ./build/app/outputs:/app/build/app/outputs
     profiles: ["tools"]
 
   test:
