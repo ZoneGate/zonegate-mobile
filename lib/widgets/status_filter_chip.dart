@@ -39,9 +39,9 @@ class StatusFilterChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: isActive ? color.withOpacity(0.10) : Colors.white,
+          color: isActive ? color.withValues(alpha: 0.10) : Colors.white,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: color.withOpacity(isActive ? 0.5 : 0.3)),
+          border: Border.all(color: color.withValues(alpha: isActive ? 0.5 : 0.3)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -64,7 +64,7 @@ class StatusFilterChip extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
               decoration: BoxDecoration(
-                color: color.withOpacity(0.15),
+                color: color.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(

@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
+
+import '../models/cargo_unit.dart';
+import '../models/policy_decision.dart';
+import '../services/zonegate_api.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_bottom_nav_bar.dart';
 import '../widgets/app_top_bar.dart';
 import '../widgets/status_badge.dart';
-import 'cargos_view.dart';
 import 'actor_device_view.dart';
+import 'cargos_view.dart';
+import 'receipt_detail_view.dart';
 import 'requests_view.dart';
 
 class HomeView extends StatefulWidget {
@@ -15,25 +20,72 @@ class HomeView extends StatefulWidget {
 }
 
 class _HomeViewState extends State<HomeView> {
-  AppTab _currentTab = AppTab.home;
+  final ZoneGateApi _api = ZoneGateApi();
+
+  List<DecisionContext> _contexts = const [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _api.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+
+    try {
+      final contexts = await _api.listDecisionContexts(limit: 40);
+      if (!mounted) return;
+
+      setState(() {
+        _contexts = contexts;
+        _error = null;
+        _loading = false;
+      });
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.message;
+        _loading = false;
+      });
+    }
+  }
 
   void _onTabSelected(AppTab tab) {
     if (tab == AppTab.home) return;
-    if (tab == AppTab.requests) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const RequestsView()),
-      );
-      return;
-    }
-    if (tab == AppTab.cargos) {
-      Navigator.of(
-        context,
-      ).pushReplacement(MaterialPageRoute(builder: (_) => const CargosView()));
-    }
+
+    final builder = tab == AppTab.requests
+        ? (BuildContext _) => const RequestsView()
+        : (BuildContext _) => const CargosView();
+
+    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: builder));
+  }
+
+  Future<void> _openDecision(String decisionId) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReceiptDetailView(decisionId: decisionId),
+      ),
+    );
+    if (mounted) _load();
   }
 
   @override
   Widget build(BuildContext context) {
+    final awaiting = _contexts
+        .where((context) => context.decision.isAwaitingAuthority)
+        .toList();
+    final recent = _contexts.take(3).toList();
+    final cargos = CargoUnit.project(_contexts).take(3).toList();
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -47,22 +99,45 @@ class _HomeViewState extends State<HomeView> {
               },
             ),
             Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                children: [
-                  _PendingRequestsCard(),
-                  const SizedBox(height: 16),
-                  _RecentActivityCard(),
-                  const SizedBox(height: 16),
-                  _CargosCard(),
-                ],
+              child: RefreshIndicator(
+                color: AppColors.primaryTeal,
+                onRefresh: _load,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                  children: [
+                    if (_error != null) _ErrorCard(message: _error!),
+                    if (_error == null && _loading && _contexts.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 80),
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            color: AppColors.primaryTeal,
+                          ),
+                        ),
+                      ),
+                    if (_error == null && (!_loading || _contexts.isNotEmpty)) ...[
+                      _AwaitingCard(
+                        items: awaiting,
+                        onOpen: _openDecision,
+                      ),
+                      const SizedBox(height: 16),
+                      _RecentActivityCard(
+                        items: recent,
+                        onOpen: _openDecision,
+                      ),
+                      const SizedBox(height: 16),
+                      _CargosCard(units: cargos),
+                    ],
+                  ],
+                ),
               ),
             ),
           ],
         ),
       ),
       bottomNavigationBar: AppBottomNavBar(
-        currentTab: _currentTab,
+        currentTab: AppTab.home,
         onTabSelected: _onTabSelected,
       ),
     );
@@ -114,36 +189,55 @@ Widget _sectionHeader(String title, String trailing, {Color? trailingColor}) {
   );
 }
 
+class _ErrorCard extends StatelessWidget {
+  final String message;
+  const _ErrorCard({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.statusBlocked.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppColors.statusBlocked.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.cloud_off_rounded,
+            size: 18,
+            color: AppColors.statusBlocked,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.4,
+                color: AppColors.statusBlocked,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Pending requests
+// Awaiting a human authority
 // ---------------------------------------------------------------------------
 
-class _PendingRequestsCard extends StatelessWidget {
-  // TODO: replace with the real list from the backend/database.
-  final List<_PendingRequest> _requests = const [
-    _PendingRequest(
-      icon: Icons.list_alt_rounded,
-      title: 'RELEASE_CARGO',
-      badgeLabel: 'AWAITING EVIDENCE',
-      tone: StatusTone.pending,
-      leftLabel: 'RESOURCE',
-      leftValue: 'CT-928411',
-      rightLabel: 'TARGET ZONE',
-      rightValue: 'PORT_GATE_17',
-    ),
-    _PendingRequest(
-      icon: Icons.error_outline_rounded,
-      title: 'PERIMETER_OVERRIDE',
-      badgeLabel: 'REQUIRES APPROVAL',
-      tone: StatusTone.pending,
-      leftLabel: 'ACCESS SECTOR',
-      leftValue: 'DOC_BY_04',
-      rightLabel: 'PRIORITY / LEVEL',
-      rightValue: 'HIGH (LVL-2)',
-    ),
-  ];
+class _AwaitingCard extends StatelessWidget {
+  final List<DecisionContext> items;
+  final void Function(String decisionId) onOpen;
 
-  _PendingRequestsCard();
+  const _AwaitingCard({required this.items, required this.onOpen});
 
   @override
   Widget build(BuildContext context) {
@@ -152,91 +246,102 @@ class _PendingRequestsCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _sectionHeader(
-            'PENDING REQUESTS',
-            '${_requests.length} PENDING',
-            trailingColor: AppColors.statusPending,
+            'AWAITING AUTHORITY',
+            '${items.length} PENDING',
+            trailingColor: items.isEmpty
+                ? AppColors.sectionLabel
+                : AppColors.statusPending,
           ),
           const SizedBox(height: 12),
-          for (final request in _requests) ...[
-            _PendingRequestTile(request: request),
-            if (request != _requests.last) const SizedBox(height: 10),
-          ],
+          if (items.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'Nothing is waiting on a human decision.',
+                style: TextStyle(fontSize: 12, color: AppColors.sectionLabel),
+              ),
+            )
+          else
+            for (final item in items.take(3)) ...[
+              _AwaitingTile(context: item, onOpen: onOpen),
+              if (item != items.take(3).last) const SizedBox(height: 10),
+            ],
         ],
       ),
     );
   }
 }
 
-class _PendingRequest {
-  final IconData icon;
-  final String title;
-  final String badgeLabel;
-  final StatusTone tone;
-  final String leftLabel;
-  final String leftValue;
-  final String rightLabel;
-  final String rightValue;
+class _AwaitingTile extends StatelessWidget {
+  final DecisionContext context;
+  final void Function(String decisionId) onOpen;
 
-  const _PendingRequest({
-    required this.icon,
-    required this.title,
-    required this.badgeLabel,
-    required this.tone,
-    required this.leftLabel,
-    required this.leftValue,
-    required this.rightLabel,
-    required this.rightValue,
-  });
-}
-
-class _PendingRequestTile extends StatelessWidget {
-  final _PendingRequest request;
-  const _PendingRequestTile({required this.request});
+  const _AwaitingTile({required this.context, required this.onOpen});
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.innerFill,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(request.icon, size: 16, color: AppColors.primaryTeal),
-              const SizedBox(width: 6),
-              Text(
-                request.title,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
+  Widget build(BuildContext buildContext) {
+    final decision = context.decision;
+    final transaction = context.transaction;
+
+    return InkWell(
+      onTap: () => onOpen(decision.decisionId),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.innerFill,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.list_alt_rounded,
+                  size: 16,
+                  color: AppColors.primaryTeal,
                 ),
-              ),
-              const Spacer(),
-              StatusBadge(label: request.badgeLabel, tone: request.tone),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _LabelValue(
-                  label: request.leftLabel,
-                  value: request.leftValue,
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    transaction?.action ?? 'PROTECTED ACTION',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
                 ),
-              ),
-              Expanded(
-                child: _LabelValue(
-                  label: request.rightLabel,
-                  value: request.rightValue,
+                const StatusBadge(
+                  label: 'AWAITING AUTHORITY',
+                  tone: StatusTone.pending,
                 ),
-              ),
-            ],
-          ),
-        ],
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _LabelValue(
+                    label: 'RESOURCE',
+                    value: transaction?.resourceId ?? '—',
+                  ),
+                ),
+                Expanded(
+                  child: _LabelValue(
+                    label: 'TARGET ZONE',
+                    value: transaction?.zone ?? '—',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            _LabelValue(
+              label: 'DECIDED BY',
+              value: decision.requiredAuthority ?? 'UNASSIGNED',
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -271,29 +376,10 @@ class _LabelValue extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _RecentActivityCard extends StatelessWidget {
-  // TODO: replace with the real-time activity log from the backend.
-  final List<_ActivityItem> _items = const [
-    _ActivityItem(
-      id: 'ZG-AUTH-81921',
-      label: 'APPROVED',
-      tone: StatusTone.positive,
-      icon: Icons.check_circle_rounded,
-    ),
-    _ActivityItem(
-      id: 'ZG-AUTH-81919',
-      label: 'BLOCKED',
-      tone: StatusTone.negative,
-      icon: Icons.block_rounded,
-    ),
-    _ActivityItem(
-      id: 'ZG-AUTH-81915',
-      label: 'HOLD',
-      tone: StatusTone.pending,
-      icon: Icons.hourglass_bottom_rounded,
-    ),
-  ];
+  final List<DecisionContext> items;
+  final void Function(String decisionId) onOpen;
 
-  _RecentActivityCard();
+  const _RecentActivityCard({required this.items, required this.onOpen});
 
   @override
   Widget build(BuildContext context) {
@@ -301,61 +387,104 @@ class _RecentActivityCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _sectionHeader('RECENT ACTIVITY', 'Real-time log'),
+          _sectionHeader('RECENT ACTIVITY', 'Policy engine log'),
           const SizedBox(height: 12),
-          for (final item in _items) ...[
-            Row(
-              children: [
-                Icon(item.icon, size: 18, color: _toneColor(item.tone)),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    item.id,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
+          if (items.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'No decisions recorded yet.',
+                style: TextStyle(fontSize: 12, color: AppColors.sectionLabel),
+              ),
+            )
+          else
+            for (final item in items) ...[
+              InkWell(
+                onTap: () => onOpen(item.decision.decisionId),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _icon(item.decision),
+                        size: 18,
+                        color: _color(item.decision),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item.decision.decisionId,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              item.transaction?.resourceId ??
+                                  item.decision.transactionId,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppColors.sectionLabel,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      StatusBadge(
+                        label: outcomeLabel(item.decision.effectiveOutcome),
+                        tone: _tone(item.decision),
+                      ),
+                    ],
                   ),
                 ),
-                StatusBadge(label: item.label, tone: item.tone),
-              ],
-            ),
-            if (item != _items.last)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 10),
-                child: Divider(height: 1, color: AppColors.cardBorder),
               ),
-          ],
+              if (item != items.last)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 10),
+                  child: Divider(height: 1, color: AppColors.cardBorder),
+                ),
+            ],
         ],
       ),
     );
   }
 
-  Color _toneColor(StatusTone tone) {
-    switch (tone) {
-      case StatusTone.positive:
-        return AppColors.statusApproved;
-      case StatusTone.negative:
-        return AppColors.statusBlocked;
-      case StatusTone.pending:
-        return AppColors.statusPending;
-      case StatusTone.neutral:
-        return const Color(0xFF6B7A83);
+  StatusTone _tone(PolicyDecision decision) {
+    switch (decision.effectiveOutcome) {
+      case DecisionOutcome.approve:
+        return StatusTone.positive;
+      case DecisionOutcome.deny:
+        return StatusTone.negative;
+      case DecisionOutcome.hold:
+        return StatusTone.pending;
     }
   }
-}
 
-class _ActivityItem {
-  final String id;
-  final String label;
-  final StatusTone tone;
-  final IconData icon;
-  const _ActivityItem({
-    required this.id,
-    required this.label,
-    required this.tone,
-    required this.icon,
-  });
+  IconData _icon(PolicyDecision decision) {
+    switch (decision.effectiveOutcome) {
+      case DecisionOutcome.approve:
+        return Icons.check_circle_rounded;
+      case DecisionOutcome.deny:
+        return Icons.block_rounded;
+      case DecisionOutcome.hold:
+        return Icons.hourglass_bottom_rounded;
+    }
+  }
+
+  Color _color(PolicyDecision decision) {
+    switch (decision.effectiveOutcome) {
+      case DecisionOutcome.approve:
+        return AppColors.statusApproved;
+      case DecisionOutcome.deny:
+        return AppColors.statusBlocked;
+      case DecisionOutcome.hold:
+        return AppColors.statusPending;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -363,25 +492,8 @@ class _ActivityItem {
 // ---------------------------------------------------------------------------
 
 class _CargosCard extends StatelessWidget {
-  // TODO: replace with the real active-units list from the backend.
-  final List<_CargoItem> _cargos = const [
-    _CargoItem(
-      id: 'CT-928411',
-      subtitle: 'In Handoff Zone',
-      badgeLabel: 'AWAITING EVIDENCE',
-      tone: StatusTone.pending,
-      icon: Icons.inventory_2_rounded,
-    ),
-    _CargoItem(
-      id: 'CT-928499',
-      subtitle: 'In Transit / Dock 4',
-      badgeLabel: 'CLEARED',
-      tone: StatusTone.positive,
-      icon: Icons.local_shipping_rounded,
-    ),
-  ];
-
-  _CargosCard();
+  final List<CargoUnit> units;
+  const _CargosCard({required this.units});
 
   @override
   Widget build(BuildContext context) {
@@ -391,70 +503,75 @@ class _CargosCard extends StatelessWidget {
         children: [
           _sectionHeader('CARGOS', 'Active Units'),
           const SizedBox(height: 12),
-          for (final cargo in _cargos) ...[
-            Row(
-              children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: AppColors.innerFill,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    cargo.icon,
-                    size: 17,
-                    color: AppColors.primaryTeal,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        cargo.id,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      Text(
-                        cargo.subtitle,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: AppColors.sectionLabel,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                StatusBadge(label: cargo.badgeLabel, tone: cargo.tone),
-              ],
-            ),
-            if (cargo != _cargos.last)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 10),
-                child: Divider(height: 1, color: AppColors.cardBorder),
+          if (units.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'No cargo units have been through the gate yet.',
+                style: TextStyle(fontSize: 12, color: AppColors.sectionLabel),
               ),
-          ],
+            )
+          else
+            for (final unit in units) ...[
+              Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: AppColors.innerFill,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      unit.status == DecisionOutcome.approve
+                          ? Icons.local_shipping_rounded
+                          : Icons.inventory_2_rounded,
+                      size: 17,
+                      color: AppColors.primaryTeal,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          unit.resourceId,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text(
+                          unit.zone,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppColors.sectionLabel,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  StatusBadge(
+                    label: unit.statusLabel,
+                    tone: unit.isAwaiting
+                        ? StatusTone.pending
+                        : unit.status == DecisionOutcome.approve
+                            ? StatusTone.positive
+                            : unit.status == DecisionOutcome.deny
+                                ? StatusTone.negative
+                                : StatusTone.pending,
+                  ),
+                ],
+              ),
+              if (unit != units.last)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 10),
+                  child: Divider(height: 1, color: AppColors.cardBorder),
+                ),
+            ],
         ],
       ),
     );
   }
-}
-
-class _CargoItem {
-  final String id;
-  final String subtitle;
-  final String badgeLabel;
-  final StatusTone tone;
-  final IconData icon;
-  const _CargoItem({
-    required this.id,
-    required this.subtitle,
-    required this.badgeLabel,
-    required this.tone,
-    required this.icon,
-  });
 }

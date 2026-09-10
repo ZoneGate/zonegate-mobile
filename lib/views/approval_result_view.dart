@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/policy_decision.dart';
 import '../theme/app_colors.dart';
 import 'receipt_detail_view.dart';
 
@@ -17,27 +18,58 @@ class ApprovalResultView extends StatelessWidget {
   final String policy;
   final String source;
 
+  /// Decision this result belongs to, so the full record can be opened.
+  final String decisionId;
+
   const ApprovalResultView({
     super.key,
     required this.authorizationRef,
     required this.checks,
     required this.policy,
     required this.source,
+    required this.decisionId,
   });
 
-  // TODO: replace with the real live result payload once the backend
-  // can push an approval event (e.g. after POST /v1/authorizations
-  // returns decision == APPROVE). Not testable yet — UI shell only.
-  factory ApprovalResultView.demoFor(String authorizationRef) {
+  /// Builds the confirmation from what the policy engine actually returned.
+  ///
+  /// The checks are the canonical evidence the Gateway collected, not a
+  /// hard-coded list: an item the planner never requested shows as
+  /// NOT COLLECTED rather than silently reading as a pass.
+  factory ApprovalResultView.fromDecision(PolicyDecision decision) {
+    String state(bool? value, {bool invert = false}) {
+      if (value == null) return 'NOT COLLECTED';
+      final good = invert ? !value : value;
+      return good ? 'VERIFIED' : 'FAILED';
+    }
+
+    final evidence = decision.evidenceSummary;
+
     return ApprovalResultView(
-      authorizationRef: authorizationRef,
-      policy: 'CARGO_RELEASE_V3',
-      source: 'AUTOMATIC',
-      checks: const [
-        ApprovalCheck(label: 'Registered Number Match', value: 'VERIFIED'),
-        ApprovalCheck(label: 'Expected Device in Zone', value: 'VERIFIED'),
-        ApprovalCheck(label: 'Device Continuity', value: 'PASS'),
-        ApprovalCheck(label: 'Reachability', value: 'PASS'),
+      authorizationRef: decision.transactionId,
+      decisionId: decision.decisionId,
+      policy: decision.reasons.isEmpty ? 'DETERMINISTIC POLICY' : decision.reasons.first,
+      source: decision.resolution == null ? 'AUTOMATIC' : 'AUTHORIZED HUMAN',
+      checks: [
+        ApprovalCheck(
+          label: 'Registered Number Match',
+          value: state(evidence?.numberVerified),
+        ),
+        ApprovalCheck(
+          label: 'Expected Device in Zone',
+          value: state(evidence?.locationVerified),
+        ),
+        ApprovalCheck(
+          label: 'SIM Continuity',
+          value: state(evidence?.recentSimSwap, invert: true),
+        ),
+        ApprovalCheck(
+          label: 'Device Continuity',
+          value: state(evidence?.recentDeviceSwap, invert: true),
+        ),
+        ApprovalCheck(
+          label: 'Reachability',
+          value: state(evidence?.reachable),
+        ),
       ],
     );
   }
@@ -57,7 +89,7 @@ class ApprovalResultView extends StatelessWidget {
                 height: 92,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: AppColors.statusApproved.withOpacity(0.10),
+                  color: AppColors.statusApproved.withValues(alpha: 0.10),
                 ),
                 child: Center(
                   child: Container(
@@ -85,7 +117,7 @@ class ApprovalResultView extends StatelessWidget {
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: AppColors.statusApproved.withOpacity(0.5),
+                    color: AppColors.statusApproved.withValues(alpha: 0.5),
                   ),
                 ),
                 child: const Text(
@@ -141,48 +173,14 @@ class ApprovalResultView extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 18),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              // A real policy reason is a full sentence, not a short code, so
+              // these stack and wrap instead of sitting side by side.
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text.rich(
-                    TextSpan(
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.sectionLabel,
-                        fontFamily: 'monospace',
-                      ),
-                      children: [
-                        const TextSpan(text: 'Policy: '),
-                        TextSpan(
-                          text: policy,
-                          style: const TextStyle(
-                            color: Colors.black87,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 24),
-                  Text.rich(
-                    TextSpan(
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.sectionLabel,
-                        fontFamily: 'monospace',
-                      ),
-                      children: [
-                        const TextSpan(text: 'Source: '),
-                        TextSpan(
-                          text: source,
-                          style: const TextStyle(
-                            color: Colors.black87,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  _MetaLine(label: 'Policy', value: policy),
+                  const SizedBox(height: 6),
+                  _MetaLine(label: 'Source', value: source),
                 ],
               ),
               const SizedBox(height: 20),
@@ -194,7 +192,7 @@ class ApprovalResultView extends StatelessWidget {
                     Navigator.of(context).pushReplacement(
                       MaterialPageRoute(
                         builder: (_) =>
-                            ReceiptDetailView.demoSuccessFor(authorizationRef),
+                            ReceiptDetailView(decisionId: decisionId),
                       ),
                     );
                   },
@@ -220,6 +218,39 @@ class ApprovalResultView extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// One `label: value` line under the checks, wrapping across as many lines as
+/// the value needs.
+class _MetaLine extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _MetaLine({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text.rich(
+      TextSpan(
+        style: const TextStyle(
+          fontSize: 12,
+          height: 1.4,
+          color: AppColors.sectionLabel,
+          fontFamily: 'monospace',
+        ),
+        children: [
+          TextSpan(text: '$label: '),
+          TextSpan(
+            text: value,
+            style: const TextStyle(
+              color: Colors.black87,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }
