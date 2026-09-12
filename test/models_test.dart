@@ -157,6 +157,26 @@ void main() {
   });
 
   group('Actor', () {
+    Actor withRole(String role) => Actor.fromJson({
+          'actor_id': 'usr_any',
+          'role': role,
+          'permissions': <String>[],
+          'registered_phone_number': '+14155550199',
+          'registered_device_id': 'dev_1',
+          'enrollment_status': 'ACTIVE',
+        });
+
+    test('a cargo operator is field personnel, with or without the prefix', () {
+      expect(withRole('CARGO_OPERATOR').isFieldPersonnel, isTrue);
+      expect(withRole('ROLE_CARGO_OPERATOR').isFieldPersonnel, isTrue);
+      expect(withRole(' role_cargo_operator ').isFieldPersonnel, isTrue);
+    });
+
+    test('supervisors and officers belong on the console, not the app', () {
+      expect(withRole('ROLE_CARGO_SUPERVISOR').isFieldPersonnel, isFalse);
+      expect(withRole('ROLE_SECURITY_OFFICER').isFieldPersonnel, isFalse);
+    });
+
     test('masks the middle of the registered number', () {
       final actor = Actor.fromJson({
         'actor_id': 'usr_cargo_operator_01',

@@ -44,6 +44,15 @@ class Actor {
   }
 
   String get roleLabel => role.replaceAll('_', ' ');
+
+  /// Cargo personnel, who use this app. Supervisors and officers decide on
+  /// the web console instead. Matches the backend: the `ROLE_` prefix and
+  /// case do not change the job.
+  bool get isFieldPersonnel {
+    var value = role.trim().toUpperCase();
+    if (value.startsWith('ROLE_')) value = value.substring('ROLE_'.length);
+    return value == 'CARGO_OPERATOR';
+  }
 }
 
 class DeviceBinding {
