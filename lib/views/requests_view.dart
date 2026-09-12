@@ -50,7 +50,9 @@ class RequestsView extends StatefulWidget {
 class _RequestsViewState extends State<RequestsView> {
   final ZoneGateApi _api = ZoneGateApi();
 
-  List<PolicyDecision> _decisions = const [];
+  // Contexts rather than bare decisions: a row has to say which cargo it was
+  // about, and only the transaction carries the resource.
+  List<DecisionContext> _entries = const [];
   final Set<StatusTone> _activeFilters = {};
 
   bool _loading = true;
@@ -74,11 +76,11 @@ class _RequestsViewState extends State<RequestsView> {
     });
 
     try {
-      final decisions = await _api.listDecisions(limit: 100);
+      final entries = await _api.listDecisionContexts(limit: 100);
       if (!mounted) return;
 
       setState(() {
-        _decisions = decisions;
+        _entries = entries;
         _error = null;
         _loading = false;
       });
@@ -102,15 +104,15 @@ class _RequestsViewState extends State<RequestsView> {
     });
   }
 
-  List<PolicyDecision> get _visible {
-    if (_activeFilters.isEmpty) return _decisions;
-    return _decisions
-        .where((decision) => _activeFilters.contains(toneFor(decision)))
+  List<DecisionContext> get _visible {
+    if (_activeFilters.isEmpty) return _entries;
+    return _entries
+        .where((entry) => _activeFilters.contains(toneFor(entry.decision)))
         .toList();
   }
 
   int _countFor(StatusTone tone) =>
-      _decisions.where((decision) => toneFor(decision) == tone).length;
+      _entries.where((entry) => toneFor(entry.decision) == tone).length;
 
   void _onTabSelected(AppTab tab) {
     if (tab == AppTab.requests) return;
@@ -221,7 +223,7 @@ class _RequestsViewState extends State<RequestsView> {
                         children: [
                           Expanded(
                             child: Text(
-                              'DECISION ID & RESOURCE',
+                              'RESOURCE & DECISION ID',
                               style: TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.w700,
@@ -242,7 +244,7 @@ class _RequestsViewState extends State<RequestsView> {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      if (_loading && _decisions.isEmpty)
+                      if (_loading && _entries.isEmpty)
                         const Padding(
                           padding: EdgeInsets.symmetric(vertical: 48),
                           child: Center(
@@ -265,21 +267,21 @@ class _RequestsViewState extends State<RequestsView> {
                           ),
                         )
                       else
-                        for (final decision in _visible) ...[
+                        for (final entry in _visible) ...[
                           _DecisionTile(
-                            decision: decision,
+                            entry: entry,
                             onTap: () async {
                               await Navigator.of(context).push(
                                 MaterialPageRoute(
                                   builder: (_) => ReceiptDetailView(
-                                    decisionId: decision.decisionId,
+                                    decisionId: entry.decision.decisionId,
                                   ),
                                 ),
                               );
                               if (mounted) _load();
                             },
                           ),
-                          if (decision != _visible.last)
+                          if (entry != _visible.last)
                             const Divider(
                               height: 1,
                               color: AppColors.cardBorder,
@@ -368,10 +370,19 @@ class _ErrorPanel extends StatelessWidget {
 }
 
 class _DecisionTile extends StatelessWidget {
-  final PolicyDecision decision;
+  final DecisionContext entry;
   final VoidCallback onTap;
 
-  const _DecisionTile({required this.decision, required this.onTap});
+  const _DecisionTile({required this.entry, required this.onTap});
+
+  PolicyDecision get decision => entry.decision;
+
+  /// The container the decision released or held. A decision whose
+  /// transaction is no longer on record falls back to its transaction id.
+  String get _title {
+    final resource = entry.transaction?.resourceId ?? '';
+    return resource.isNotEmpty ? resource : decision.transactionId;
+  }
 
   IconData get _icon {
     switch (toneFor(decision)) {
@@ -427,7 +438,7 @@ class _DecisionTile extends StatelessWidget {
                     children: [
                       Flexible(
                         child: Text(
-                          decision.decisionId,
+                          _title,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 14,
@@ -461,7 +472,7 @@ class _DecisionTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '${formatUtcTime(decision.decidedAt)} · ${decision.transactionId}',
+                    '${formatUtcTime(decision.decidedAt)} · ${decision.decisionId}',
                     style: const TextStyle(
                       fontSize: 12,
                       color: AppColors.sectionLabel,
