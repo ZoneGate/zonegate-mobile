@@ -1,28 +1,43 @@
 import 'package:flutter/material.dart';
+
+import '../config/api_config.dart';
+import '../models/policy_decision.dart';
+import '../services/zonegate_api.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_bottom_nav_bar.dart';
 import '../widgets/app_top_bar.dart';
 import '../widgets/status_badge.dart';
 import '../widgets/status_filter_chip.dart';
-import 'cargos_view.dart';
 import 'actor_device_view.dart';
-import 'home_view.dart';
+import 'cargos_view.dart';
 import 'receipt_detail_view.dart';
+import 'home_view.dart';
 
-class _AuthEntry {
-  final String id;
-  final String time;
-  final String route;
-  final String relativeTime;
-  final StatusTone tone;
+StatusTone toneFor(PolicyDecision decision) {
+  switch (decision.effectiveOutcome) {
+    case DecisionOutcome.approve:
+      return StatusTone.positive;
+    case DecisionOutcome.deny:
+      return StatusTone.negative;
+    case DecisionOutcome.hold:
+      return StatusTone.pending;
+  }
+}
 
-  const _AuthEntry({
-    required this.id,
-    required this.time,
-    required this.route,
-    required this.relativeTime,
-    required this.tone,
-  });
+String formatUtcTime(DateTime value) {
+  final utc = value.toUtc();
+  final hour = utc.hour.toString().padLeft(2, '0');
+  final minute = utc.minute.toString().padLeft(2, '0');
+  return '$hour:$minute UTC';
+}
+
+String relativeFrom(DateTime value) {
+  final diff = DateTime.now().toUtc().difference(value.toUtc());
+
+  if (diff.inSeconds < 60) return 'just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+  if (diff.inHours < 24) return '${diff.inHours}h ago';
+  return '${diff.inDays}d ago';
 }
 
 class RequestsView extends StatefulWidget {
@@ -33,67 +48,51 @@ class RequestsView extends StatefulWidget {
 }
 
 class _RequestsViewState extends State<RequestsView> {
-  final List<_AuthEntry> _entries = const [
-    _AuthEntry(
-      id: 'ZG-AUTH-81921',
-      time: '10:44 UTC',
-      route: 'GATE-12 · BAY-04',
-      relativeTime: '2m ago',
-      tone: StatusTone.positive,
-    ),
-    _AuthEntry(
-      id: 'ZG-AUTH-81920',
-      time: '10:41 UTC',
-      route: 'GATE-09 · NORTH',
-      relativeTime: '5m ago',
-      tone: StatusTone.positive,
-    ),
-    _AuthEntry(
-      id: 'ZG-AUTH-81919',
-      time: '10:39 UTC',
-      route: 'GATE-03 · AIRLOCK 1',
-      relativeTime: '12m ago',
-      tone: StatusTone.negative,
-    ),
-    _AuthEntry(
-      id: 'ZG-AUTH-81915',
-      time: '10:35 UTC',
-      route: 'SECTOR B · QUARANTINE',
-      relativeTime: '16m ago',
-      tone: StatusTone.pending,
-    ),
-    _AuthEntry(
-      id: 'ZG-AUTH-81912',
-      time: '10:28 UTC',
-      route: 'GATE-12 · BAY-02',
-      relativeTime: '28m ago',
-      tone: StatusTone.positive,
-    ),
-    _AuthEntry(
-      id: 'ZG-AUTH-81908',
-      time: '10:20 UTC',
-      route: 'PERIMETER GATE 1B',
-      relativeTime: '36m ago',
-      tone: StatusTone.negative,
-    ),
-    _AuthEntry(
-      id: 'ZG-AUTH-81904',
-      time: '10:14 UTC',
-      route: 'GATE-08 · CUSTOMS',
-      relativeTime: '42m ago',
-      tone: StatusTone.negative,
-    ),
-    _AuthEntry(
-      id: 'ZG-AUTH-81898',
-      time: '10:02 UTC',
-      route: 'SECTOR C · CUSTOMS HOLD',
-      relativeTime: '54m ago',
-      tone: StatusTone.pending,
-    ),
-  ];
+  final ZoneGateApi _api = ZoneGateApi();
 
-  // Which filter chips are currently active. Empty set = show everything.
+  // Contexts rather than bare decisions: a row has to say which cargo it was
+  // about, and only the transaction carries the resource.
+  List<DecisionContext> _entries = const [];
   final Set<StatusTone> _activeFilters = {};
+
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _api.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+    });
+
+    try {
+      final entries = await _api.listDecisionContexts(limit: 100);
+      if (!mounted) return;
+
+      setState(() {
+        _entries = entries;
+        _error = null;
+        _loading = false;
+      });
+    } on ApiException catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        _error = error.message;
+        _loading = false;
+      });
+    }
+  }
 
   void _toggleFilter(StatusTone tone) {
     setState(() {
@@ -105,13 +104,15 @@ class _RequestsViewState extends State<RequestsView> {
     });
   }
 
-  List<_AuthEntry> get _visibleEntries {
+  List<DecisionContext> get _visible {
     if (_activeFilters.isEmpty) return _entries;
-    return _entries.where((e) => _activeFilters.contains(e.tone)).toList();
+    return _entries
+        .where((entry) => _activeFilters.contains(toneFor(entry.decision)))
+        .toList();
   }
 
   int _countFor(StatusTone tone) =>
-      _entries.where((e) => e.tone == tone).length;
+      _entries.where((entry) => toneFor(entry.decision) == tone).length;
 
   void _onTabSelected(AppTab tab) {
     if (tab == AppTab.requests) return;
@@ -144,81 +145,151 @@ class _RequestsViewState extends State<RequestsView> {
             ),
             const Divider(height: 1, color: AppColors.cardBorder),
             Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-                children: [
-                  const Text(
-                    'Authorization Requests',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Cryptographic audit log & authorization records',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: AppColors.sectionLabel,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      StatusFilterChip(
-                        label: 'APPROVED',
-                        count: _countFor(StatusTone.positive),
-                        tone: StatusTone.positive,
-                        isActive: _activeFilters.contains(StatusTone.positive),
-                        onTap: () => _toggleFilter(StatusTone.positive),
-                      ),
-                      StatusFilterChip(
-                        label: 'BLOCKED',
-                        count: _countFor(StatusTone.negative),
-                        tone: StatusTone.negative,
-                        isActive: _activeFilters.contains(StatusTone.negative),
-                        onTap: () => _toggleFilter(StatusTone.negative),
-                      ),
-                      StatusFilterChip(
-                        label: 'HOLD',
-                        count: _countFor(StatusTone.pending),
-                        tone: StatusTone.pending,
-                        isActive: _activeFilters.contains(StatusTone.pending),
-                        onTap: () => _toggleFilter(StatusTone.pending),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 22),
-                  const Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'AUTHORIZATION ID & ROUTE',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.sectionLabel,
-                            letterSpacing: 0.3,
+              child: RefreshIndicator(
+                color: AppColors.primaryTeal,
+                onRefresh: _load,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Authorization Requests',
+                                style: TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'Live decisions from the policy engine',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: AppColors.sectionLabel,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ),
-                      Text(
-                        'TIMESTAMP',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.sectionLabel,
-                          letterSpacing: 0.3,
+                        IconButton(
+                          onPressed: _loading ? null : _load,
+                          icon: const Icon(Icons.refresh_rounded),
+                          color: AppColors.primaryTeal,
+                          tooltip: 'Refresh',
                         ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    if (_error != null) _ErrorPanel(message: _error!),
+                    if (_error == null) ...[
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          StatusFilterChip(
+                            label: 'APPROVED',
+                            count: _countFor(StatusTone.positive),
+                            tone: StatusTone.positive,
+                            isActive:
+                                _activeFilters.contains(StatusTone.positive),
+                            onTap: () => _toggleFilter(StatusTone.positive),
+                          ),
+                          StatusFilterChip(
+                            label: 'BLOCKED',
+                            count: _countFor(StatusTone.negative),
+                            tone: StatusTone.negative,
+                            isActive:
+                                _activeFilters.contains(StatusTone.negative),
+                            onTap: () => _toggleFilter(StatusTone.negative),
+                          ),
+                          StatusFilterChip(
+                            label: 'HOLD',
+                            count: _countFor(StatusTone.pending),
+                            tone: StatusTone.pending,
+                            isActive:
+                                _activeFilters.contains(StatusTone.pending),
+                            onTap: () => _toggleFilter(StatusTone.pending),
+                          ),
+                        ],
                       ),
+                      const SizedBox(height: 22),
+                      const Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'RESOURCE & DECISION ID',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.sectionLabel,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            'DECIDED',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.sectionLabel,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      if (_loading && _entries.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 48),
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              color: AppColors.primaryTeal,
+                            ),
+                          ),
+                        )
+                      else if (_visible.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 48),
+                          child: Center(
+                            child: Text(
+                              'No authorization records yet.',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: AppColors.sectionLabel,
+                              ),
+                            ),
+                          ),
+                        )
+                      else
+                        for (final entry in _visible) ...[
+                          _DecisionTile(
+                            entry: entry,
+                            onTap: () async {
+                              await Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => ReceiptDetailView(
+                                    decisionId: entry.decision.decisionId,
+                                  ),
+                                ),
+                              );
+                              if (mounted) _load();
+                            },
+                          ),
+                          if (entry != _visible.last)
+                            const Divider(
+                              height: 1,
+                              color: AppColors.cardBorder,
+                            ),
+                        ],
                     ],
-                  ),
-                  const SizedBox(height: 8),
-                  for (final entry in _visibleEntries) ...[
-                    _AuthEntryTile(entry: entry),
-                    if (entry != _visibleEntries.last)
-                      const Divider(height: 1, color: AppColors.cardBorder),
                   ],
-                ],
+                ),
               ),
             ),
           ],
@@ -232,12 +303,89 @@ class _RequestsViewState extends State<RequestsView> {
   }
 }
 
-class _AuthEntryTile extends StatelessWidget {
-  final _AuthEntry entry;
-  const _AuthEntryTile({required this.entry});
+class _ErrorPanel extends StatelessWidget {
+  final String message;
+  const _ErrorPanel({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.statusBlocked.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppColors.statusBlocked.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.cloud_off_rounded,
+                size: 18,
+                color: AppColors.statusBlocked,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'Authorization API unavailable',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.statusBlocked,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.statusBlocked,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Endpoint: ${ApiConfig.baseUrl}',
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppColors.sectionLabel,
+            ),
+          ),
+          if (!ApiConfig.isExplicit)
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text(
+                'Address was inferred. Pass --dart-define=API_URL=... to override.',
+                style: TextStyle(fontSize: 11, color: AppColors.sectionLabel),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DecisionTile extends StatelessWidget {
+  final DecisionContext entry;
+  final VoidCallback onTap;
+
+  const _DecisionTile({required this.entry, required this.onTap});
+
+  PolicyDecision get decision => entry.decision;
+
+  /// The container the decision released or held. A decision whose
+  /// transaction is no longer on record falls back to its transaction id.
+  String get _title {
+    final resource = entry.transaction?.resourceId ?? '';
+    return resource.isNotEmpty ? resource : decision.transactionId;
+  }
 
   IconData get _icon {
-    switch (entry.tone) {
+    switch (toneFor(decision)) {
       case StatusTone.positive:
         return Icons.check_rounded;
       case StatusTone.negative:
@@ -250,7 +398,7 @@ class _AuthEntryTile extends StatelessWidget {
   }
 
   Color get _color {
-    switch (entry.tone) {
+    switch (toneFor(decision)) {
       case StatusTone.positive:
         return AppColors.statusApproved;
       case StatusTone.negative:
@@ -265,32 +413,6 @@ class _AuthEntryTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = _color;
-    VoidCallback? onTap;
-    if (entry.tone == StatusTone.positive) {
-      onTap = () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => ReceiptDetailView.demoSuccessFor(entry.id),
-          ),
-        );
-      };
-    } else if (entry.tone == StatusTone.negative) {
-      onTap = () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => ReceiptDetailView.demoRejectedFor(entry.id),
-          ),
-        );
-      };
-    } else if (entry.tone == StatusTone.pending) {
-      onTap = () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => ReceiptDetailView.demoHoldFor(entry.id),
-          ),
-        );
-      };
-    }
 
     return InkWell(
       onTap: onTap,
@@ -302,7 +424,7 @@ class _AuthEntryTile extends StatelessWidget {
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: color.withOpacity(0.12),
+                color: color.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(_icon, size: 18, color: color),
@@ -312,16 +434,45 @@ class _AuthEntryTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    entry.id,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                    ),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          _title,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      if (decision.isAwaitingAuthority) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.statusPending
+                                .withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'AWAITING',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.statusPending,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '${entry.time} · ${entry.route}',
+                    '${formatUtcTime(decision.decidedAt)} · ${decision.decisionId}',
                     style: const TextStyle(
                       fontSize: 12,
                       color: AppColors.sectionLabel,
@@ -331,7 +482,7 @@ class _AuthEntryTile extends StatelessWidget {
               ),
             ),
             Text(
-              entry.relativeTime,
+              relativeFrom(decision.decidedAt),
               style: const TextStyle(
                 fontSize: 12,
                 color: AppColors.sectionLabel,

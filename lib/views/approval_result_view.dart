@@ -1,44 +1,52 @@
 import 'package:flutter/material.dart';
+import '../models/policy_decision.dart';
 import '../theme/app_colors.dart';
+import '../widgets/evidence_check_line.dart';
 import 'receipt_detail_view.dart';
-
-class ApprovalCheck {
-  final String label;
-  final String value;
-  const ApprovalCheck({required this.label, required this.value});
-}
 
 /// Instant, lightweight confirmation shown the moment a request is
 /// approved — separate from ReceiptDetailView, which is the fuller
 /// record someone opens later from the Requests log.
 class ApprovalResultView extends StatelessWidget {
   final String authorizationRef;
-  final List<ApprovalCheck> checks;
+  final List<EvidenceCheck> checks;
   final String policy;
   final String source;
+
+  /// Limits the engine attached to this decision -- a check the carrier could
+  /// not attest, for instance. Shown rather than dropped: an approval that
+  /// rests on less evidence than the full set has to say so on the screen the
+  /// operator actually reads, not only in the audit record.
+  final List<String> caveats;
+
+  /// Decision this result belongs to, so the full record can be opened.
+  final String decisionId;
 
   const ApprovalResultView({
     super.key,
     required this.authorizationRef,
     required this.checks,
     required this.policy,
+    this.caveats = const [],
     required this.source,
+    required this.decisionId,
   });
 
-  // TODO: replace with the real live result payload once the backend
-  // can push an approval event (e.g. after POST /v1/authorizations
-  // returns decision == APPROVE). Not testable yet — UI shell only.
-  factory ApprovalResultView.demoFor(String authorizationRef) {
+  /// Builds the confirmation from what the policy engine actually returned.
+  ///
+  /// The checks are the canonical evidence the Gateway collected, not a
+  /// hard-coded list: an item the planner never requested reads as not
+  /// collected rather than silently reading as a pass.
+  factory ApprovalResultView.fromDecision(PolicyDecision decision) {
+    final evidence = decision.evidenceSummary;
+
     return ApprovalResultView(
-      authorizationRef: authorizationRef,
-      policy: 'CARGO_RELEASE_V3',
-      source: 'AUTOMATIC',
-      checks: const [
-        ApprovalCheck(label: 'Registered Number Match', value: 'VERIFIED'),
-        ApprovalCheck(label: 'Expected Device in Zone', value: 'VERIFIED'),
-        ApprovalCheck(label: 'Device Continuity', value: 'PASS'),
-        ApprovalCheck(label: 'Reachability', value: 'PASS'),
-      ],
+      authorizationRef: decision.transactionId,
+      decisionId: decision.decisionId,
+      policy: decision.reasons.isEmpty ? 'DETERMINISTIC POLICY' : decision.reasons.first,
+      source: decision.resolution == null ? 'AUTOMATIC' : 'AUTHORIZED HUMAN',
+      caveats: decision.reasons.skip(1).toList(),
+      checks: evidenceChecksFrom(evidence),
     );
   }
 
@@ -47,17 +55,18 @@ class ApprovalResultView extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
+        // Five wrapped sentences are taller than five short codes were, so the
+        // page scrolls rather than overflowing on a small screen.
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 32, 20, 32),
           child: Column(
             children: [
-              const Spacer(flex: 3),
               Container(
                 width: 92,
                 height: 92,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: AppColors.statusApproved.withOpacity(0.10),
+                  color: AppColors.statusApproved.withValues(alpha: 0.10),
                 ),
                 child: Center(
                   child: Container(
@@ -85,7 +94,7 @@ class ApprovalResultView extends StatelessWidget {
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: AppColors.statusApproved.withOpacity(0.5),
+                    color: AppColors.statusApproved.withValues(alpha: 0.5),
                   ),
                 ),
                 child: const Text(
@@ -110,30 +119,7 @@ class ApprovalResultView extends StatelessWidget {
                 child: Column(
                   children: [
                     for (final check in checks) ...[
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              check.label,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                color: Colors.black87,
-                              ),
-                            ),
-                            Text(
-                              check.value,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.primaryTeal,
-                                letterSpacing: 0.3,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      EvidenceCheckLine(check: check),
                       if (check != checks.last)
                         const Divider(height: 1, color: AppColors.cardBorder),
                     ],
@@ -141,48 +127,34 @@ class ApprovalResultView extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 18),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              // A real policy reason is a full sentence, not a short code, so
+              // these stack and wrap instead of sitting side by side.
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text.rich(
-                    TextSpan(
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.sectionLabel,
-                        fontFamily: 'monospace',
+                  _MetaLine(label: 'Policy', value: policy),
+                  const SizedBox(height: 6),
+                  _MetaLine(label: 'Source', value: source),
+                  for (final caveat in caveats) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFFBEB),
+                        border: Border.all(color: const Color(0xFFFDE68A)),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      children: [
-                        const TextSpan(text: 'Policy: '),
-                        TextSpan(
-                          text: policy,
-                          style: const TextStyle(
-                            color: Colors.black87,
-                            fontWeight: FontWeight.w600,
-                          ),
+                      child: Text(
+                        caveat,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          height: 1.4,
+                          color: Color(0xFF92400E),
                         ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 24),
-                  Text.rich(
-                    TextSpan(
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.sectionLabel,
-                        fontFamily: 'monospace',
                       ),
-                      children: [
-                        const TextSpan(text: 'Source: '),
-                        TextSpan(
-                          text: source,
-                          style: const TextStyle(
-                            color: Colors.black87,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
                     ),
-                  ),
+                  ],
                 ],
               ),
               const SizedBox(height: 20),
@@ -194,7 +166,7 @@ class ApprovalResultView extends StatelessWidget {
                     Navigator.of(context).pushReplacement(
                       MaterialPageRoute(
                         builder: (_) =>
-                            ReceiptDetailView.demoSuccessFor(authorizationRef),
+                            ReceiptDetailView(decisionId: decisionId),
                       ),
                     );
                   },
@@ -216,10 +188,42 @@ class ApprovalResultView extends StatelessWidget {
                   ),
                 ),
               ),
-              const Spacer(flex: 4),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// One `label: value` line under the checks, wrapping across as many lines as
+/// the value needs.
+class _MetaLine extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _MetaLine({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text.rich(
+      TextSpan(
+        style: const TextStyle(
+          fontSize: 12,
+          height: 1.4,
+          color: AppColors.sectionLabel,
+          fontFamily: 'monospace',
+        ),
+        children: [
+          TextSpan(text: '$label: '),
+          TextSpan(
+            text: value,
+            style: const TextStyle(
+              color: Colors.black87,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }

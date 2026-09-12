@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
+import '../services/session.dart';
 import '../theme/app_colors.dart';
 import 'zonegate_logo.dart';
 
 /// Top bar shared by Home, Requests, and Cargos.
+///
+/// Identity comes from the signed-in session, so the bar shows the actor the
+/// backend will actually evaluate rather than a placeholder.
 class AppTopBar extends StatelessWidget {
-  final String employeeId;
-  final String role;
+  final String? employeeId;
+  final String? role;
   final VoidCallback? onAvatarTap;
 
   const AppTopBar({
     super.key,
-    this.employeeId = 'EMP-204',
-    this.role = 'WAREHOUSE OPERATOR',
+    this.employeeId,
+    this.role,
     this.onAvatarTap,
   });
 
@@ -36,14 +40,14 @@ class AppTopBar extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                employeeId,
+                employeeId ?? Session.actorId,
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                 ),
               ),
               Text(
-                role,
+                (role ?? Session.roleLabel).toUpperCase(),
                 style: const TextStyle(
                   fontSize: 9,
                   color: AppColors.sectionLabel,

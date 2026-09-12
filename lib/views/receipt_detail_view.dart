@@ -1,191 +1,60 @@
 import 'package:flutter/material.dart';
+
+import '../models/policy_decision.dart';
+import '../services/zonegate_api.dart';
 import '../theme/app_colors.dart';
-import '../widgets/app_top_bar.dart';
+import '../util/timestamps.dart';
 import '../widgets/status_badge.dart';
 
-enum ReceiptResult { success, rejected, hold }
+/// The full record for one authorization, loaded from the backend.
+///
+/// Everything here comes from `/v1/authorizations/{id}/context`: the
+/// transaction, the network evidence the gateway collected, the agent's
+/// advisory assessment, the policy engine's binding outcome, and — when a HOLD
+/// was handed to a person — their final verdict.
+class ReceiptDetailView extends StatefulWidget {
+  final String decisionId;
 
-class EvidenceRow {
-  final String number;
-  final String location;
-  final String continuity;
-  final String reachability;
+  const ReceiptDetailView({super.key, required this.decisionId});
 
-  const EvidenceRow({
-    required this.number,
-    required this.location,
-    required this.continuity,
-    required this.reachability,
-  });
+  @override
+  State<ReceiptDetailView> createState() => _ReceiptDetailViewState();
 }
 
-/// Full receipt for one authorization — success, rejected, and hold
-/// share this same screen, only the result-driven fields differ.
-class ReceiptDetailView extends StatelessWidget {
-  final String receiptId;
-  final ReceiptResult result;
-  final String authorizationRef;
-  final String timestamp;
-  final String policyApplied;
-  final String decisionSource;
-  final String? rejectionReason;
-  final String? holdReason;
-  final String? supervisorNote;
-  final String evaluatedByLabel;
-  final String evaluatedBy;
-  final List<EvidenceRow> evidence;
+class _ReceiptDetailViewState extends State<ReceiptDetailView> {
+  final ZoneGateApi _api = ZoneGateApi();
 
-  const ReceiptDetailView({
-    super.key,
-    required this.receiptId,
-    required this.result,
-    required this.authorizationRef,
-    required this.timestamp,
-    required this.policyApplied,
-    required this.decisionSource,
-    required this.evaluatedByLabel,
-    required this.evaluatedBy,
-    required this.evidence,
-    this.rejectionReason,
-    this.holdReason,
-    this.supervisorNote,
-  });
+  DecisionContext? _context;
+  bool _loading = true;
+  String? _error;
 
-  // TODO: replace these factories with a real receipt lookup once the
-  // backend exposes an endpoint. For now they build plausible demo
-  // data from the tapped authorization's id.
-  factory ReceiptDetailView.demoSuccessFor(String authorizationRef) {
-    final numericPart = authorizationRef.split('-').last;
-    return ReceiptDetailView(
-      receiptId: 'ZG-RCP-$numericPart',
-      result: ReceiptResult.success,
-      authorizationRef: authorizationRef,
-      timestamp: '2023-11-24 14:22:11 UTC',
-      policyApplied: 'CARGO_RELEASE_V3',
-      decisionSource: 'AUTHORIZED_HUMAN',
-      evaluatedByLabel: 'APPROVED BY',
-      evaluatedBy: 'SUP-902 (Port Supervisor)',
-      evidence: const [
-        EvidenceRow(
-          number: 'EV-001',
-          location: 'Node-Alpha',
-          continuity: 'Verified',
-          reachability: 'Direct',
-        ),
-        EvidenceRow(
-          number: 'EV-002',
-          location: 'Gateway-7',
-          continuity: 'Verified',
-          reachability: 'Routed',
-        ),
-        EvidenceRow(
-          number: 'EV-003',
-          location: 'Term-B',
-          continuity: 'Verified',
-          reachability: 'Direct',
-        ),
-        EvidenceRow(
-          number: 'EV-004',
-          location: 'Auth-Server',
-          continuity: 'Verified',
-          reachability: 'Direct',
-        ),
-      ],
-    );
+  @override
+  void initState() {
+    super.initState();
+    _load();
   }
 
-  factory ReceiptDetailView.demoRejectedFor(String authorizationRef) {
-    final numericPart = authorizationRef.split('-').last;
-    return ReceiptDetailView(
-      receiptId: 'ZG-RCP-$numericPart',
-      result: ReceiptResult.rejected,
-      authorizationRef: authorizationRef,
-      timestamp: '2023-11-24 14:22:11 UTC',
-      policyApplied: 'CARGO_RELEASE_V3',
-      decisionSource: 'SECURITY_GATEWAY',
-      rejectionReason: 'TOKEN_ALREADY_CONSUMED',
-      evaluatedByLabel: 'EVALUATED BY',
-      evaluatedBy: 'SUP-902 (Port Supervisor)',
-      evidence: const [
-        EvidenceRow(
-          number: 'EV-001',
-          location: 'Node-Alpha',
-          continuity: 'Failed',
-          reachability: 'Direct',
-        ),
-        EvidenceRow(
-          number: 'EV-002',
-          location: 'Gateway-7',
-          continuity: 'Blocked',
-          reachability: 'Routed',
-        ),
-        EvidenceRow(
-          number: 'EV-003',
-          location: 'Term-B',
-          continuity: 'Unverified',
-          reachability: 'Direct',
-        ),
-        EvidenceRow(
-          number: 'EV-004',
-          location: 'Auth-Server',
-          continuity: 'Mismatch',
-          reachability: 'Direct',
-        ),
-      ],
-    );
+  @override
+  void dispose() {
+    _api.dispose();
+    super.dispose();
   }
 
-  factory ReceiptDetailView.demoHoldFor(String authorizationRef) {
-    final numericPart = authorizationRef.split('-').last;
-    return ReceiptDetailView(
-      receiptId: 'ZG-RCP-$numericPart',
-      result: ReceiptResult.hold,
-      authorizationRef: authorizationRef,
-      timestamp: '2023-11-24 14:22:11 UTC',
-      policyApplied: 'CARGO_RELEASE_V3 (SECURITY_HOLD)',
-      decisionSource: 'AUTOMATED_QUARANTINE',
-      holdReason:
-          'Sensor variance detected at Gate 4B cargo container scanner. Continuity audit required before physical gate clearance.',
-      evaluatedByLabel: 'ASSIGNED SUPERVISOR',
-      evaluatedBy: 'SUP-902 (Port Supervisor)',
-      supervisorNote: 'Pending Decision',
-      evidence: const [
-        EvidenceRow(
-          number: 'EV-001',
-          location: 'Node-Alpha',
-          continuity: 'Verified',
-          reachability: 'Direct',
-        ),
-        EvidenceRow(
-          number: 'EV-002',
-          location: 'Gateway-7',
-          continuity: 'Verified',
-          reachability: 'Routed',
-        ),
-        EvidenceRow(
-          number: 'EV-003',
-          location: 'Term-B',
-          continuity: 'Under Audit',
-          reachability: 'Direct',
-        ),
-        EvidenceRow(
-          number: 'EV-004',
-          location: 'Auth-Server',
-          continuity: 'Unsynced',
-          reachability: 'Direct',
-        ),
-      ],
-    );
-  }
-
-  Color get _resultColor {
-    switch (result) {
-      case ReceiptResult.success:
-        return AppColors.statusApproved;
-      case ReceiptResult.rejected:
-        return AppColors.statusBlocked;
-      case ReceiptResult.hold:
-        return AppColors.statusPending;
+  Future<void> _load() async {
+    try {
+      final loaded = await _api.decisionContext(widget.decisionId);
+      if (!mounted) return;
+      setState(() {
+        _context = loaded;
+        _error = null;
+        _loading = false;
+      });
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.message;
+        _loading = false;
+      });
     }
   }
 
@@ -193,562 +62,440 @@ class ReceiptDetailView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: Column(
-          children: [
-            const AppTopBar(),
-            const Divider(height: 1, color: AppColors.cardBorder),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                children: [
-                  Row(
-                    children: [
-                      IconButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(
-                          Icons.arrow_back_rounded,
-                          size: 20,
-                          color: Colors.black87,
-                        ),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                      ),
-                      const SizedBox(width: 6),
-                      const Text(
-                        'Receipt Detail',
-                        style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Padding(
-                    padding: const EdgeInsets.only(left: 34),
-                    child: Row(
-                      children: [
-                        Text(
-                          'ID: $receiptId',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: AppColors.sectionLabel,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                        if (result == ReceiptResult.hold) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            width: 6,
-                            height: 6,
-                            decoration: BoxDecoration(
-                              color: _resultColor,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  _ExecutionResultCard(result: result, color: _resultColor),
-                  const SizedBox(height: 16),
-                  _InfoCard(
-                    result: result,
-                    authorizationRef: authorizationRef,
-                    authRefColor: _resultColor,
-                    timestamp: timestamp,
-                    policyApplied: policyApplied,
-                    decisionSource: decisionSource,
-                    rejectionReason: rejectionReason,
-                    holdReason: holdReason,
-                    supervisorNote: supervisorNote,
-                    evaluatedByLabel: evaluatedByLabel,
-                    evaluatedBy: evaluatedBy,
-                  ),
-                  const SizedBox(height: 16),
-                  _EvidenceSummaryCard(evidence: evidence, result: result),
-                ],
-              ),
-            ),
-          ],
+      appBar: AppBar(
+        backgroundColor: AppColors.background,
+        elevation: 0,
+        foregroundColor: const Color(0xFF12242A),
+        title: const Text(
+          'Authorization Record',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
         ),
       ),
-    );
-  }
-}
-
-class _ExecutionResultCard extends StatelessWidget {
-  final ReceiptResult result;
-  final Color color;
-  const _ExecutionResultCard({required this.result, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    final isHold = result == ReceiptResult.hold;
-    final isRejected = result == ReceiptResult.rejected;
-    final icon = isHold
-        ? Icons.pending_actions_outlined
-        : (isRejected ? Icons.close_rounded : Icons.check_rounded);
-    final label = isHold ? 'EXECUTION STATUS' : 'EXECUTION RESULT';
-    final resultText = isHold
-        ? 'SUPERVISOR HOLD'
-        : (isRejected ? 'REJECTED' : 'SUCCESS');
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 28),
-      decoration: BoxDecoration(
-        color: AppColors.innerFill,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.cardBorder),
-      ),
-      child: Column(
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: color.withOpacity(0.10),
-              border: Border.all(color: color.withOpacity(0.4)),
-            ),
-            child: Icon(icon, color: color, size: 26),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: AppColors.sectionLabel,
-              letterSpacing: 0.5,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            resultText,
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
-              color: color,
-              letterSpacing: 0.5,
-            ),
-          ),
-        ],
+      body: SafeArea(
+        child: _loading
+            ? const Center(
+                child: CircularProgressIndicator(color: AppColors.primaryTeal),
+              )
+            : _error != null
+                ? Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Text(
+                      _error!,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        height: 1.4,
+                        color: AppColors.statusBlocked,
+                      ),
+                    ),
+                  )
+                : _body(_context!),
       ),
     );
   }
-}
 
-class _InfoCard extends StatelessWidget {
-  final ReceiptResult result;
-  final String authorizationRef;
-  final Color authRefColor;
-  final String timestamp;
-  final String policyApplied;
-  final String decisionSource;
-  final String? rejectionReason;
-  final String? holdReason;
-  final String? supervisorNote;
-  final String evaluatedByLabel;
-  final String evaluatedBy;
+  Widget _body(DecisionContext data) {
+    final decision = data.decision;
+    final transaction = data.transaction;
+    final evidence = data.evidence;
+    final resolution = decision.resolution;
+    final receipt = data.receipt;
 
-  const _InfoCard({
-    required this.result,
-    required this.authorizationRef,
-    required this.authRefColor,
-    required this.timestamp,
-    required this.policyApplied,
-    required this.decisionSource,
-    required this.evaluatedByLabel,
-    required this.evaluatedBy,
-    this.rejectionReason,
-    this.holdReason,
-    this.supervisorNote,
-  });
+    final tone = switch (decision.effectiveOutcome) {
+      DecisionOutcome.approve => StatusTone.positive,
+      DecisionOutcome.deny => StatusTone.negative,
+      DecisionOutcome.hold => StatusTone.pending,
+    };
 
-  @override
-  Widget build(BuildContext context) {
-    final isHold = result == ReceiptResult.hold;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppColors.innerFill,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.cardBorder),
-      ),
-      child: Column(
-        children: [
-          _InfoRow(label: 'TIMESTAMP', value: timestamp, monospace: true),
-          const Divider(height: 1, color: AppColors.cardBorder),
-          _InfoRow(
-            label: 'AUTHORIZATION REF',
-            value: authorizationRef,
-            monospace: true,
-            valueColor: authRefColor,
-          ),
-          const Divider(height: 1, color: AppColors.cardBorder),
-          _InfoRow(
-            label: 'POLICY APPLIED',
-            value: policyApplied,
-            monospace: true,
-          ),
-          const Divider(height: 1, color: AppColors.cardBorder),
-          _InfoRow(
-            label: 'DECISION SOURCE',
-            value: decisionSource,
-            monospace: true,
-          ),
-          if (rejectionReason != null) ...[
-            const Divider(height: 1, color: AppColors.cardBorder),
-            _InfoRow(
-              label: 'REJECTION REASON',
-              value: rejectionReason!,
-              monospace: true,
-              valueColor: AppColors.statusBlocked,
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            StatusBadge(
+              label: outcomeLabel(decision.effectiveOutcome),
+              tone: tone,
             ),
+            if (decision.isAwaitingAuthority)
+              const StatusBadge(
+                label: 'AWAITING AUTHORITY',
+                tone: StatusTone.pending,
+              ),
+            if (resolution != null)
+              const StatusBadge(
+                label: 'HUMAN DECIDED',
+                tone: StatusTone.neutral,
+              ),
           ],
-          const Divider(height: 1, color: AppColors.cardBorder),
-          isHold
-              ? _SupervisorRow(
-                  label: evaluatedByLabel,
-                  value: evaluatedBy,
-                  note: supervisorNote,
-                  noteColor: authRefColor,
-                  isLast: holdReason == null,
-                )
-              : _InfoRow(
-                  label: evaluatedByLabel,
-                  value: evaluatedBy,
-                  icon: Icons.badge_outlined,
-                  isLast: true,
-                ),
-          if (holdReason != null) ...[
-            const Divider(height: 1, color: AppColors.cardBorder),
-            _HoldReasonBlock(reason: holdReason!, color: authRefColor),
-          ],
-        ],
-      ),
-    );
-  }
-}
+        ),
+        const SizedBox(height: 14),
+        Text(
+          transaction == null
+              ? decision.decisionId
+              : '${transaction.action} · ${transaction.resourceId}',
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          receipt == null
+              ? decision.decisionId
+              : '${receipt.receiptId} · ${decision.decisionId}',
+          style: const TextStyle(fontSize: 12, color: AppColors.sectionLabel),
+        ),
+        const SizedBox(height: 20),
 
-class _InfoRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final bool monospace;
-  final Color? valueColor;
-  final IconData? icon;
-  final bool isLast;
-
-  const _InfoRow({
-    required this.label,
-    required this.value,
-    this.monospace = false,
-    this.valueColor,
-    this.icon,
-    this.isLast = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(top: 14, bottom: isLast ? 14 : 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppColors.sectionLabel,
-              letterSpacing: 0.3,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Row(
+        _Card(
+          title: 'POLICY OUTCOME',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (icon != null) ...[
-                Icon(
-                  icon,
-                  size: 15,
-                  color: valueColor ?? AppColors.primaryTeal,
+              for (final reason in decision.reasons)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    reason,
+                    style: const TextStyle(fontSize: 13, height: 1.4),
+                  ),
                 ),
-                const SizedBox(width: 6),
+              const SizedBox(height: 4),
+              _Row(
+                label: 'Decision source',
+                value: resolution == null
+                    ? 'DETERMINISTIC POLICY'
+                    : 'AUTHORIZED HUMAN',
+              ),
+              if (decision.requiredAuthority != null)
+                _Row(
+                  label: 'Required authority',
+                  value: decision.requiredAuthority!,
+                ),
+              _Row(
+                label: 'Decided at',
+                value: formatStamp(decision.decidedAt),
+              ),
+            ],
+          ),
+        ),
+
+        if (transaction != null)
+          _Card(
+            title: 'REQUESTED ACTION',
+            child: Column(
+              children: [
+                _Row(label: 'Actor', value: transaction.actorId),
+                _Row(label: 'Resource', value: transaction.resourceId),
+                _Row(label: 'Zone', value: transaction.zone),
+                _Row(label: 'Value', value: transaction.value),
+                _Row(
+                  label: 'Requested',
+                  value: formatStamp(transaction.timestamp),
+                ),
               ],
-              Expanded(
-                child: Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    fontFamily: monospace ? 'monospace' : null,
-                    color: valueColor ?? Colors.black87,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Like _InfoRow, but the value is split into a neutral part and a
-/// colored trailing note (e.g. "SUP-902 (Port Supervisor) - Pending Decision").
-class _SupervisorRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final String? note;
-  final Color noteColor;
-  final bool isLast;
-
-  const _SupervisorRow({
-    required this.label,
-    required this.value,
-    required this.noteColor,
-    this.note,
-    this.isLast = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(top: 14, bottom: isLast ? 14 : 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppColors.sectionLabel,
-              letterSpacing: 0.3,
             ),
           ),
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              Icon(Icons.hourglass_bottom_rounded, size: 15, color: noteColor),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text.rich(
-                  TextSpan(
+
+        if (evidence != null)
+          _Card(
+            title: 'NETWORK EVIDENCE',
+            child: Column(
+              children: [
+                _EvidenceRow(
+                  label: 'Number verified',
+                  state: evidence.numberVerified,
+                ),
+                _EvidenceRow(
+                  label: 'Location verified',
+                  state: evidence.locationVerified,
+                ),
+                _EvidenceRow(
+                  label: 'Recent SIM swap',
+                  state: evidence.recentSimSwap,
+                  invert: true,
+                ),
+                _EvidenceRow(
+                  label: 'Recent device swap',
+                  state: evidence.recentDeviceSwap,
+                  invert: true,
+                ),
+                _EvidenceRow(
+                  label: 'Device reachable',
+                  state: evidence.reachable,
+                ),
+                if (data.collectedEvidence.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    'Collected: ${data.collectedEvidence.join(', ')}',
                     style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.black87,
+                      fontSize: 11,
+                      color: AppColors.sectionLabel,
                     ),
-                    children: [
-                      TextSpan(text: value),
-                      if (note != null) ...[
-                        const TextSpan(text: ' - '),
-                        TextSpan(
-                          text: note,
-                          style: TextStyle(color: noteColor),
-                        ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+        _Card(
+          title: 'AGENT ASSESSMENT (ADVISORY)',
+          child: decision.contextEvaluation == null
+              ? const Text(
+                  'No agent assessment was recorded. Evidence planning fell '
+                  'back to the mandatory baseline and the decision was made on '
+                  'network facts alone.',
+                  style: TextStyle(fontSize: 13, height: 1.4),
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final factor
+                            in decision.contextEvaluation!.riskFactors)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.innerFill,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              factor,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
                       ],
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      decision.contextEvaluation!.rationale,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        height: 1.4,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Recommended: '
+                      '${outcomeLabel(decision.contextEvaluation!.recommendedControl)}'
+                      ' — advisory only, never binding',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.sectionLabel,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
+        ),
 
-class _HoldReasonBlock extends StatelessWidget {
-  final String reason;
-  final Color color;
-  const _HoldReasonBlock({required this.reason, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 14, bottom: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'HOLD REASON',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppColors.sectionLabel,
-              letterSpacing: 0.3,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: color.withOpacity(0.35)),
-            ),
-            child: Text(
-              reason,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: color,
-                height: 1.4,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EvidenceSummaryCard extends StatelessWidget {
-  final List<EvidenceRow> evidence;
-  final ReceiptResult result;
-  const _EvidenceSummaryCard({required this.evidence, required this.result});
-
-  StatusTone _toneFor(String continuity) {
-    switch (continuity.toLowerCase()) {
-      case 'verified':
-        return StatusTone.positive;
-      case 'unverified':
-        return StatusTone.neutral;
-      case 'under audit':
-      case 'unsynced':
-        return StatusTone.pending;
-      default:
-        return StatusTone.negative;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // The evidence icon reflects the network's own findings, not the
-    // overall receipt outcome — a hold can still have mostly-verified
-    // evidence, so it keeps the neutral/teal "verified" look.
-    final isRejected = result == ReceiptResult.rejected;
-    final headerColor = isRejected
-        ? AppColors.statusBlocked
-        : AppColors.primaryTeal;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.innerFill,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.cardBorder),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                isRejected
-                    ? Icons.gpp_bad_outlined
-                    : Icons.verified_user_outlined,
-                size: 18,
-                color: headerColor,
-              ),
-              const SizedBox(width: 8),
-              const Text(
-                'Evidence Summary',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: const [
-              Expanded(flex: 2, child: _HeaderCell('NUMBER')),
-              Expanded(flex: 3, child: _HeaderCell('LOCATION')),
-              Expanded(flex: 3, child: _HeaderCell('CONTINUITY')),
-              Expanded(flex: 2, child: _HeaderCell('REACHABILITY')),
-            ],
-          ),
-          const SizedBox(height: 10),
-          for (final row in evidence) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Expanded(
-                    flex: 2,
+        if (resolution != null)
+          _Card(
+            title: 'HUMAN RESOLUTION',
+            child: Column(
+              children: [
+                _Row(
+                  label: 'Final outcome',
+                  value: outcomeLabel(resolution.outcome),
+                ),
+                _Row(label: 'Decided by', value: resolution.resolvedBy),
+                _Row(label: 'Authority', value: resolution.authorityRole),
+                _Row(
+                  label: 'Decided at',
+                  value: formatStamp(resolution.resolvedAt),
+                ),
+                if (resolution.note.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
                     child: Text(
-                      row.number,
+                      resolution.note,
                       style: const TextStyle(
                         fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    flex: 3,
-                    child: Text(
-                      row.location,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.black87,
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    flex: 3,
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: StatusBadge(
-                        label: row.continuity,
-                        tone: _toneFor(row.continuity),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    flex: 2,
-                    child: Text(
-                      row.reachability,
-                      style: const TextStyle(
-                        fontSize: 12,
+                        height: 1.4,
                         color: AppColors.sectionLabel,
                       ),
                     ),
                   ),
-                ],
+              ],
+            ),
+          ),
+
+        if (decision.isAwaitingAuthority)
+          Container(
+            margin: const EdgeInsets.only(bottom: 14),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.statusPending.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: AppColors.statusPending.withValues(alpha: 0.3),
               ),
             ),
-            if (row != evidence.last)
-              const Divider(height: 1, color: AppColors.cardBorder),
-          ],
+            child: Text(
+              'Waiting on ${decision.requiredAuthority ?? 'a designated authority'}. '
+              'This decision is resolved from the operations console, not from '
+              'the field app.',
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.4,
+                color: AppColors.statusPending,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+
+        if (receipt?.token != null)
+          _Card(
+            title: 'SCOPED AUTHORIZATION TOKEN',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  receipt!.token!,
+                  style: const TextStyle(fontSize: 11, height: 1.5),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Bound to this actor, action, resource and zone.',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.sectionLabel,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _Card extends StatelessWidget {
+  final String title;
+  final Widget child;
+
+  const _Card({required this.title, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.4,
+              color: AppColors.sectionLabel,
+            ),
+          ),
+          const SizedBox(height: 12),
+          child,
         ],
       ),
     );
   }
 }
 
-class _HeaderCell extends StatelessWidget {
-  final String text;
-  const _HeaderCell(this.text);
+class _Row extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _Row({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: const TextStyle(
-        fontSize: 9,
-        fontWeight: FontWeight.w700,
-        color: AppColors.sectionLabel,
-        letterSpacing: 0.3,
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppColors.sectionLabel,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EvidenceRow extends StatelessWidget {
+  final String label;
+  final bool? state;
+
+  /// For swap checks a `true` reading is the bad outcome.
+  final bool invert;
+
+  const _EvidenceRow({
+    required this.label,
+    required this.state,
+    this.invert = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final good = state == null ? null : (invert ? !state! : state!);
+
+    final color = good == null
+        ? const Color(0xFF6B7A83)
+        : good
+            ? AppColors.statusApproved
+            : AppColors.statusBlocked;
+
+    final text = state == null ? 'NOT COLLECTED' : (state! ? 'TRUE' : 'FALSE');
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          Expanded(child: Text(label, style: const TextStyle(fontSize: 13))),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: color.withValues(alpha: 0.3)),
+            ),
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                color: color,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
