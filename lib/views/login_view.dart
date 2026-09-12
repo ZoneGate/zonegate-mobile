@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../config/api_config.dart';
 import '../services/session.dart';
 import '../services/zonegate_api.dart';
 import '../theme/app_colors.dart';
@@ -185,7 +184,7 @@ class _LoginViewState extends State<LoginView> {
                                 Icon(Icons.login, size: 18),
                                 SizedBox(width: 8),
                                 Text(
-                                  'Giriş Yap',
+                                  'Sign In',
                                   style: TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
@@ -193,14 +192,6 @@ class _LoginViewState extends State<LoginView> {
                                 ),
                               ],
                             ),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  Text(
-                    ApiConfig.baseUrl,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppColors.sectionLabel,
                     ),
                   ),
                 ],
