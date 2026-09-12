@@ -39,4 +39,9 @@ class ApiConfig {
   static bool get isExplicit => _override.isNotEmpty;
 
   static const Duration timeout = Duration(seconds: 15);
+
+  /// Only the wait for the streamed response to *open*, not for the pipeline
+  /// to finish. A cold local model can take longer than a plain request, and
+  /// the point of the stream is that the operator watches it work.
+  static const Duration streamTimeout = Duration(seconds: 30);
 }

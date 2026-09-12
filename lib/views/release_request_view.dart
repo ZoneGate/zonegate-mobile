@@ -2,18 +2,16 @@ import 'package:flutter/material.dart';
 
 import '../models/policy_decision.dart';
 import '../services/session.dart';
-import '../services/zonegate_api.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_text_field.dart';
-import 'approval_result_view.dart';
-import 'receipt_detail_view.dart';
-import 'security_alert_view.dart';
+import 'agent_progress_view.dart';
 
 /// The field operator's action: ask ZoneGate to authorize a cargo release.
 ///
-/// This posts the transaction and lets the pipeline answer. Where it lands is
-/// the whole point of the product:
-///   APPROVE -> confirmation with a scoped token
+/// Submitting hands over to [AgentProgressView], which runs the pipeline and
+/// shows each step as the backend reaches it. Where it lands is the whole
+/// point of the product:
+///   APPROVE -> confirmation
 ///   DENY    -> security alert, blocked at the policy layer
 ///   HOLD    -> handed to a named human, decided from the operations console
 class ReleaseRequestView extends StatefulWidget {
@@ -28,9 +26,20 @@ class _ReleaseRequestViewState extends State<ReleaseRequestView> {
   final _zoneController = TextEditingController(text: 'PORT_GATE_17');
   final _valueController = TextEditingController(text: '15000.00');
 
-  final ZoneGateApi _api = ZoneGateApi();
+  /// The categories the backend knows. Which of these are restricted is
+  /// policy, and policy is the backend's to apply -- this screen only says
+  /// what is in the container.
+  static const List<String> _categories = [
+    'GENERAL',
+    'PERISHABLE',
+    'HIGH_VALUE',
+    'HAZARDOUS',
+    'CONTROLLED_SUBSTANCE',
+    'WEAPONS',
+  ];
 
-  bool _busy = false;
+  String _category = 'GENERAL';
+
   String? _error;
 
   @override
@@ -38,11 +47,10 @@ class _ReleaseRequestViewState extends State<ReleaseRequestView> {
     _resourceController.dispose();
     _zoneController.dispose();
     _valueController.dispose();
-    _api.dispose();
     super.dispose();
   }
 
-  Future<void> _submit() async {
+  void _submit() {
     final actor = Session.actor;
 
     if (actor == null) {
@@ -56,10 +64,7 @@ class _ReleaseRequestViewState extends State<ReleaseRequestView> {
       return;
     }
 
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
+    setState(() => _error = null);
 
     final now = DateTime.now().toUtc();
 
@@ -72,34 +77,14 @@ class _ReleaseRequestViewState extends State<ReleaseRequestView> {
       zone: _zoneController.text.trim(),
       timestamp: now,
       value: _valueController.text.trim(),
+      category: _category,
     );
 
-    try {
-      final result = await _api.requestAuthorization(transaction);
-      if (!mounted) return;
-
-      final decision = result.decision;
-
-      final Widget destination = switch (decision.decision) {
-        DecisionOutcome.approve => ApprovalResultView.fromDecision(decision),
-        DecisionOutcome.deny => SecurityAlertView.fromDecision(
-            decision,
-            zone: transaction.zone,
-          ),
-        DecisionOutcome.hold =>
-          ReceiptDetailView(decisionId: decision.decisionId),
-      };
-
-      Navigator.of(
-        context,
-      ).pushReplacement(MaterialPageRoute(builder: (_) => destination));
-    } on ApiException catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _error = error.message;
-      });
-    }
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => AgentProgressView(transaction: transaction),
+      ),
+    );
   }
 
   @override
@@ -141,6 +126,45 @@ class _ReleaseRequestViewState extends State<ReleaseRequestView> {
 
             const _FieldLabel('TARGET ZONE'),
             AppTextField(hintText: 'PORT_GATE_17', controller: _zoneController),
+            const SizedBox(height: 16),
+
+            const _FieldLabel('CARGO CATEGORY'),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                color: AppColors.fieldFill,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _category,
+                  isExpanded: true,
+                  borderRadius: BorderRadius.circular(10),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  items: [
+                    for (final category in _categories)
+                      DropdownMenuItem(value: category, child: Text(category)),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setState(() => _category = value);
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'A restricted category is never released automatically: it is '
+              'handed to the role the policy names for it.',
+              style: TextStyle(
+                fontSize: 11,
+                height: 1.4,
+                color: AppColors.sectionLabel,
+              ),
+            ),
             const SizedBox(height: 16),
 
             const _FieldLabel('DECLARED VALUE (USD)'),
@@ -218,7 +242,7 @@ class _ReleaseRequestViewState extends State<ReleaseRequestView> {
               width: double.infinity,
               height: 52,
               child: ElevatedButton(
-                onPressed: _busy ? null : _submit,
+                onPressed: _submit,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primaryTeal,
                   foregroundColor: AppColors.buttonText,
@@ -229,22 +253,10 @@ class _ReleaseRequestViewState extends State<ReleaseRequestView> {
                   ),
                   elevation: 0,
                 ),
-                child: _busy
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Text(
-                        'Request Authorization',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                child: const Text(
+                  'Request Authorization',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                ),
               ),
             ),
           ],
