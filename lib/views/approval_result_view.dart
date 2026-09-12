@@ -13,6 +13,12 @@ class ApprovalResultView extends StatelessWidget {
   final String policy;
   final String source;
 
+  /// Limits the engine attached to this decision -- a check the carrier could
+  /// not attest, for instance. Shown rather than dropped: an approval that
+  /// rests on less evidence than the full set has to say so on the screen the
+  /// operator actually reads, not only in the audit record.
+  final List<String> caveats;
+
   /// Decision this result belongs to, so the full record can be opened.
   final String decisionId;
 
@@ -21,6 +27,7 @@ class ApprovalResultView extends StatelessWidget {
     required this.authorizationRef,
     required this.checks,
     required this.policy,
+    this.caveats = const [],
     required this.source,
     required this.decisionId,
   });
@@ -38,6 +45,7 @@ class ApprovalResultView extends StatelessWidget {
       decisionId: decision.decisionId,
       policy: decision.reasons.isEmpty ? 'DETERMINISTIC POLICY' : decision.reasons.first,
       source: decision.resolution == null ? 'AUTOMATIC' : 'AUTHORIZED HUMAN',
+      caveats: decision.reasons.skip(1).toList(),
       checks: evidenceChecksFrom(evidence),
     );
   }
@@ -127,6 +135,26 @@ class ApprovalResultView extends StatelessWidget {
                   _MetaLine(label: 'Policy', value: policy),
                   const SizedBox(height: 6),
                   _MetaLine(label: 'Source', value: source),
+                  for (final caveat in caveats) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFFBEB),
+                        border: Border.all(color: const Color(0xFFFDE68A)),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        caveat,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          height: 1.4,
+                          color: Color(0xFF92400E),
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
               const SizedBox(height: 20),

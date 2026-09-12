@@ -11,10 +11,11 @@ import 'home_view.dart';
 /// Signing in confirms that this actor is enrolled and that a device is bound
 /// to them, then remembers that for the session.
 ///
-/// It is deliberately not a password check: the backend has no authentication,
-/// and every authorization is validated against the actor-device binding
-/// rather than against a credential. Swap this for a real credential exchange
-/// as soon as the API grows one.
+/// It is deliberately not a password check. The API's password endpoints
+/// guard the web console, where a person is at a keyboard; on the handset the
+/// thing being established is that this device is the one bound to this
+/// actor, which the carrier attests and a password cannot. Every authorization
+/// is validated against that binding rather than against a credential.
 class LoginView extends StatefulWidget {
   const LoginView({super.key});
 
