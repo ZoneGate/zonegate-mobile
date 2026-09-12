@@ -82,6 +82,16 @@ class _LoginViewState extends State<LoginView> {
         return;
       }
 
+      if (!enrollment.actor.isFieldPersonnel) {
+        setState(() {
+          _busy = false;
+          _error =
+              "'$actorId' is ${enrollment.actor.role}. This app is for cargo "
+              'personnel; supervisors and officers decide on the web console.';
+        });
+        return;
+      }
+
       Session.signIn(enrollment);
 
       Navigator.of(
