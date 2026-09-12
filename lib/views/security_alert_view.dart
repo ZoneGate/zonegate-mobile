@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/policy_decision.dart';
 import '../theme/app_colors.dart';
+import '../widgets/evidence_check_line.dart';
 
 /// Full-screen security alert shown when the system detects something
 /// like a presence attack, a stolen-account attempt, or a login from
@@ -9,8 +10,11 @@ class SecurityAlertView extends StatelessWidget {
   final String badgeLabel;
   final String title;
   final String reasonCode;
-  final String diagnosticLabel;
-  final String diagnosticValue;
+
+  /// Every carrier check, in the same words the approval screen uses, so a
+  /// blocked operator can see what did pass as well as what did not.
+  final List<EvidenceCheck> checks;
+
   final String requiredZoneNote;
   final String requiredZoneCode;
 
@@ -19,8 +23,7 @@ class SecurityAlertView extends StatelessWidget {
     required this.badgeLabel,
     required this.title,
     required this.reasonCode,
-    required this.diagnosticLabel,
-    required this.diagnosticValue,
+    required this.checks,
     required this.requiredZoneNote,
     required this.requiredZoneCode,
   });
@@ -55,10 +58,7 @@ class SecurityAlertView extends StatelessWidget {
       badgeLabel: 'BLOCKED',
       title: title,
       reasonCode: reasonCode,
-      diagnosticLabel: locationFailed
-          ? 'Registered device in handoff zone:'
-          : 'Deterministic policy check:',
-      diagnosticValue: locationFailed ? 'NOT VERIFIED' : 'FAILED',
+      checks: evidenceChecksFrom(evidence),
       requiredZoneNote: locationFailed
           ? 'This action requires the enrolled device to be present at'
           : 'Blocked at the policy layer for',
@@ -174,7 +174,7 @@ class SecurityAlertView extends StatelessWidget {
                   ),
                   const SizedBox(height: 22),
                   const Text(
-                    'DIAGNOSTIC EVIDENCE',
+                    'NETWORK EVIDENCE',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
@@ -182,37 +182,12 @@ class SecurityAlertView extends StatelessWidget {
                       letterSpacing: 0.3,
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.podcasts_rounded,
-                        size: 18,
-                        color: AppColors.iconMuted,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          diagnosticLabel,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: Colors.black87,
-                          ),
-                        ),
-                      ),
-                      Text(
-                        diagnosticValue,
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.statusBlocked,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  const Divider(height: 1, color: AppColors.cardBorder),
+                  const SizedBox(height: 4),
+                  for (final check in checks) ...[
+                    EvidenceCheckLine(check: check),
+                    if (check != checks.last)
+                      const Divider(height: 1, color: AppColors.cardBorder),
+                  ],
                   const SizedBox(height: 22),
                   Container(
                     width: double.infinity,

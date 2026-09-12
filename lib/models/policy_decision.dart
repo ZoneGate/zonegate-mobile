@@ -172,7 +172,13 @@ class TransactionRequest {
   final String resourceId;
   final String zone;
   final DateTime timestamp;
+
+  /// Declared value. Recorded for the audit trail; it decides nothing.
   final String value;
+
+  /// Cargo category. A category the policy marks as restricted is escalated
+  /// to its named authority instead of releasing on the engine's own decision.
+  final String category;
 
   const TransactionRequest({
     required this.transactionId,
@@ -182,6 +188,7 @@ class TransactionRequest {
     required this.zone,
     required this.timestamp,
     required this.value,
+    this.category = 'GENERAL',
   });
 
   factory TransactionRequest.fromJson(Map<String, dynamic> json) {
@@ -195,6 +202,7 @@ class TransactionRequest {
           DateTime.tryParse(json['timestamp']?.toString() ?? '')?.toUtc() ??
               DateTime.now().toUtc(),
       value: json['value']?.toString() ?? '0',
+      category: json['category']?.toString() ?? 'GENERAL',
     );
   }
 
@@ -206,6 +214,7 @@ class TransactionRequest {
         'zone': zone,
         'timestamp': timestamp.toUtc().toIso8601String(),
         'value': value,
+        'category': category,
       };
 }
 

@@ -1,20 +1,15 @@
 import 'package:flutter/material.dart';
 import '../models/policy_decision.dart';
 import '../theme/app_colors.dart';
+import '../widgets/evidence_check_line.dart';
 import 'receipt_detail_view.dart';
-
-class ApprovalCheck {
-  final String label;
-  final String value;
-  const ApprovalCheck({required this.label, required this.value});
-}
 
 /// Instant, lightweight confirmation shown the moment a request is
 /// approved — separate from ReceiptDetailView, which is the fuller
 /// record someone opens later from the Requests log.
 class ApprovalResultView extends StatelessWidget {
   final String authorizationRef;
-  final List<ApprovalCheck> checks;
+  final List<EvidenceCheck> checks;
   final String policy;
   final String source;
 
@@ -33,15 +28,9 @@ class ApprovalResultView extends StatelessWidget {
   /// Builds the confirmation from what the policy engine actually returned.
   ///
   /// The checks are the canonical evidence the Gateway collected, not a
-  /// hard-coded list: an item the planner never requested shows as
-  /// NOT COLLECTED rather than silently reading as a pass.
+  /// hard-coded list: an item the planner never requested reads as not
+  /// collected rather than silently reading as a pass.
   factory ApprovalResultView.fromDecision(PolicyDecision decision) {
-    String state(bool? value, {bool invert = false}) {
-      if (value == null) return 'NOT COLLECTED';
-      final good = invert ? !value : value;
-      return good ? 'VERIFIED' : 'FAILED';
-    }
-
     final evidence = decision.evidenceSummary;
 
     return ApprovalResultView(
@@ -49,28 +38,7 @@ class ApprovalResultView extends StatelessWidget {
       decisionId: decision.decisionId,
       policy: decision.reasons.isEmpty ? 'DETERMINISTIC POLICY' : decision.reasons.first,
       source: decision.resolution == null ? 'AUTOMATIC' : 'AUTHORIZED HUMAN',
-      checks: [
-        ApprovalCheck(
-          label: 'Registered Number Match',
-          value: state(evidence?.numberVerified),
-        ),
-        ApprovalCheck(
-          label: 'Expected Device in Zone',
-          value: state(evidence?.locationVerified),
-        ),
-        ApprovalCheck(
-          label: 'SIM Continuity',
-          value: state(evidence?.recentSimSwap, invert: true),
-        ),
-        ApprovalCheck(
-          label: 'Device Continuity',
-          value: state(evidence?.recentDeviceSwap, invert: true),
-        ),
-        ApprovalCheck(
-          label: 'Reachability',
-          value: state(evidence?.reachable),
-        ),
-      ],
+      checks: evidenceChecksFrom(evidence),
     );
   }
 
@@ -79,11 +47,12 @@ class ApprovalResultView extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
+        // Five wrapped sentences are taller than five short codes were, so the
+        // page scrolls rather than overflowing on a small screen.
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 32, 20, 32),
           child: Column(
             children: [
-              const Spacer(flex: 3),
               Container(
                 width: 92,
                 height: 92,
@@ -142,30 +111,7 @@ class ApprovalResultView extends StatelessWidget {
                 child: Column(
                   children: [
                     for (final check in checks) ...[
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              check.label,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                color: Colors.black87,
-                              ),
-                            ),
-                            Text(
-                              check.value,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.primaryTeal,
-                                letterSpacing: 0.3,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      EvidenceCheckLine(check: check),
                       if (check != checks.last)
                         const Divider(height: 1, color: AppColors.cardBorder),
                     ],
@@ -214,7 +160,6 @@ class ApprovalResultView extends StatelessWidget {
                   ),
                 ),
               ),
-              const Spacer(flex: 4),
             ],
           ),
         ),

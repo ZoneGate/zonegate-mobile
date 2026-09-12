@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/api_config.dart';
 import '../models/actor.dart';
+import '../models/pipeline_stage.dart';
 import '../models/policy_decision.dart';
 
 /// Raised when the API cannot be reached or answers with an error.
@@ -152,6 +153,85 @@ class ZoneGateApi {
       ),
     );
     return AuthorizationResult.fromJson(body as Map<String, dynamic>);
+  }
+
+  /// The same pipeline, reported as it runs.
+  ///
+  /// Yields a [StageEvent] as each of the six steps starts and finishes, then
+  /// one [AuthorizationResult]. The result is the same payload
+  /// [requestAuthorization] returns; the events exist so the operator can see
+  /// which step the request is on instead of watching a spinner.
+  ///
+  /// The stream ends when the pipeline does. A transport failure arrives as an
+  /// [ApiException] on the stream rather than a silent close, so a caller can
+  /// never mistake a dropped connection for a decision.
+  Stream<Object> streamAuthorization(TransactionRequest transaction) async* {
+    final request = http.Request('POST', _uri('/v1/authorizations/stream'))
+      ..headers.addAll(const {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+      })
+      ..body = jsonEncode(transaction.toJson());
+
+    http.StreamedResponse response;
+
+    try {
+      response = await _client.send(request).timeout(ApiConfig.streamTimeout);
+    } catch (error) {
+      throw ApiException(
+        'Cannot reach the authorization API at $baseUrl. '
+        'Check that the backend is running and that this device can see it.',
+      );
+    }
+
+    if (response.statusCode >= 400) {
+      final body = await response.stream.bytesToString();
+      String detail = 'HTTP ${response.statusCode}';
+
+      try {
+        final parsed = jsonDecode(body);
+        if (parsed is Map && parsed['detail'] != null) {
+          detail = parsed['detail'].toString();
+        }
+      } catch (_) {
+        // A non-JSON body leaves the status line as the message.
+      }
+
+      throw ApiException(detail, response.statusCode);
+    }
+
+    // Server-sent events: `event:` then `data:`, frames split by a blank line.
+    var eventName = '';
+    final lines = response.stream
+        .transform(utf8.decoder)
+        .transform(const LineSplitter());
+
+    await for (final line in lines) {
+      if (line.startsWith('event:')) {
+        eventName = line.substring(6).trim();
+        continue;
+      }
+
+      if (!line.startsWith('data:')) continue;
+
+      final data = line.substring(5).trim();
+      if (data.isEmpty) continue;
+
+      final decoded = jsonDecode(data);
+      if (decoded is! Map<String, dynamic>) continue;
+
+      switch (eventName) {
+        case 'stage':
+          final event = StageEvent.fromJson(decoded);
+          if (event != null) yield event;
+        case 'result':
+          yield AuthorizationResult.fromJson(decoded);
+        case 'error':
+          throw ApiException(
+            decoded['detail']?.toString() ?? 'The authorization pipeline failed.',
+          );
+      }
+    }
   }
 
   /// Records the binding human decision on a HOLD.
