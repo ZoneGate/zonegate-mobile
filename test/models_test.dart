@@ -7,6 +7,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:is_takip_uygulamasi/models/actor.dart';
 import 'package:is_takip_uygulamasi/models/cargo_unit.dart';
+import 'package:is_takip_uygulamasi/models/evidence_label.dart';
 import 'package:is_takip_uygulamasi/models/policy_decision.dart';
 
 Map<String, dynamic> decisionJson({
@@ -202,6 +203,31 @@ void main() {
       });
 
       expect(actor.maskedPhone, '+1415');
+    });
+  });
+
+  group('evidenceLabel', () {
+    const planned = ['LOCATION_VERIFICATION', 'SIM_SWAP'];
+
+    test('reads an answered check as the carrier gave it', () {
+      expect(evidenceLabel('SIM_SWAP', false, planned), 'FALSE');
+      expect(evidenceLabel('LOCATION_VERIFICATION', true, planned), 'TRUE');
+    });
+
+    test('keeps not collected for a planned check with no answer', () {
+      expect(evidenceLabel('SIM_SWAP', null, planned), 'NOT COLLECTED');
+    });
+
+    test('tells an unrequested check from an unattestable one', () {
+      expect(evidenceLabel('REACHABILITY', null, planned), 'NOT REQUESTED');
+      expect(
+        evidenceLabel('NUMBER_VERIFICATION', null, planned),
+        'CARRIER CANNOT ATTEST',
+      );
+    });
+
+    test('does not guess without a plan', () {
+      expect(evidenceLabel('NUMBER_VERIFICATION', null, const []), 'NOT COLLECTED');
     });
   });
 
