@@ -78,18 +78,18 @@ class _ReceiptDetailViewState extends State<ReceiptDetailView> {
                 child: CircularProgressIndicator(color: AppColors.primaryTeal),
               )
             : _error != null
-                ? Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Text(
-                      _error!,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        height: 1.4,
-                        color: AppColors.statusBlocked,
-                      ),
-                    ),
-                  )
-                : _body(_context!),
+            ? Padding(
+                padding: const EdgeInsets.all(20),
+                child: Text(
+                  _error!,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    height: 1.4,
+                    color: AppColors.statusBlocked,
+                  ),
+                ),
+              )
+            : _body(_context!),
       ),
     );
   }
@@ -171,10 +171,7 @@ class _ReceiptDetailViewState extends State<ReceiptDetailView> {
                   label: 'Required authority',
                   value: decision.requiredAuthority!,
                 ),
-              _Row(
-                label: 'Decided at',
-                value: formatStamp(decision.decidedAt),
-              ),
+              _Row(label: 'Decided at', value: formatStamp(decision.decidedAt)),
             ],
           ),
         ),
@@ -202,33 +199,31 @@ class _ReceiptDetailViewState extends State<ReceiptDetailView> {
             child: Column(
               children: [
                 _EvidenceRow(
-                  label: 'Number verified',
+                  label: 'Number verification',
                   kind: 'NUMBER_VERIFICATION',
                   planned: data.collectedEvidence,
                   state: evidence.numberVerified,
                 ),
                 _EvidenceRow(
-                  label: 'Location verified',
+                  label: 'Location verification',
                   kind: 'LOCATION_VERIFICATION',
                   planned: data.collectedEvidence,
                   state: evidence.locationVerified,
                 ),
                 _EvidenceRow(
-                  label: 'Recent SIM swap',
+                  label: 'SIM swap check',
                   kind: 'SIM_SWAP',
                   planned: data.collectedEvidence,
                   state: evidence.recentSimSwap,
-                  invert: true,
                 ),
                 _EvidenceRow(
-                  label: 'Recent device swap',
+                  label: 'Device swap check',
                   kind: 'DEVICE_SWAP',
                   planned: data.collectedEvidence,
                   state: evidence.recentDeviceSwap,
-                  invert: true,
                 ),
                 _EvidenceRow(
-                  label: 'Device reachable',
+                  label: 'Reachability',
                   kind: 'REACHABILITY',
                   planned: data.collectedEvidence,
                   state: evidence.reachable,
@@ -375,10 +370,7 @@ class _ReceiptDetailViewState extends State<ReceiptDetailView> {
                 const SizedBox(height: 8),
                 const Text(
                   'Bound to this actor, action, resource and zone.',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: AppColors.sectionLabel,
-                  ),
+                  style: TextStyle(fontSize: 11, color: AppColors.sectionLabel),
                 ),
               ],
             ),
@@ -460,54 +452,53 @@ class _Row extends StatelessWidget {
   }
 }
 
+/// One network evidence check: a tick, a cross or a dash, and what the
+/// carrier reported in a short line underneath.
 class _EvidenceRow extends StatelessWidget {
   final String label;
   final String kind;
   final List<String> planned;
   final bool? state;
 
-  /// For swap checks a `true` reading is the bad outcome.
-  final bool invert;
-
   const _EvidenceRow({
     required this.label,
     required this.kind,
     required this.planned,
     required this.state,
-    this.invert = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final good = state == null ? null : (invert ? !state! : state!);
+    final badge = evidenceBadge(kind, state, planned);
 
-    final color = good == null
-        ? const Color(0xFF6B7A83)
-        : good
-            ? AppColors.statusApproved
-            : AppColors.statusBlocked;
-
-    final text = evidenceLabel(kind, state, planned);
+    final (IconData icon, Color colour) = switch (badge.passed) {
+      true => (Icons.check_circle, AppColors.statusApproved),
+      false => (Icons.cancel, AppColors.statusBlocked),
+      null => (Icons.remove_circle_outline, const Color(0xFF6B7A83)),
+    };
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(child: Text(label, style: const TextStyle(fontSize: 13))),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: color.withValues(alpha: 0.3)),
-            ),
-            child: Text(
-              text,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-                color: color,
-              ),
+          Icon(icon, size: 20, color: colour),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(fontSize: 13)),
+                const SizedBox(height: 2),
+                Text(
+                  badge.detail,
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    height: 1.3,
+                    color: AppColors.sectionLabel,
+                  ),
+                ),
+              ],
             ),
           ),
         ],

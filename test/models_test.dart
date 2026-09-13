@@ -159,13 +159,13 @@ void main() {
 
   group('Actor', () {
     Actor withRole(String role) => Actor.fromJson({
-          'actor_id': 'usr_any',
-          'role': role,
-          'permissions': <String>[],
-          'registered_phone_number': '+14155550199',
-          'registered_device_id': 'dev_1',
-          'enrollment_status': 'ACTIVE',
-        });
+      'actor_id': 'usr_any',
+      'role': role,
+      'permissions': <String>[],
+      'registered_phone_number': '+14155550199',
+      'registered_device_id': 'dev_1',
+      'enrollment_status': 'ACTIVE',
+    });
 
     test('a cargo operator is field personnel, with or without the prefix', () {
       expect(withRole('CARGO_OPERATOR').isFieldPersonnel, isTrue);
@@ -206,28 +206,41 @@ void main() {
     });
   });
 
-  group('evidenceLabel', () {
+  group('evidenceBadge', () {
     const planned = ['LOCATION_VERIFICATION', 'SIM_SWAP'];
 
-    test('reads an answered check as the carrier gave it', () {
-      expect(evidenceLabel('SIM_SWAP', false, planned), 'FALSE');
-      expect(evidenceLabel('LOCATION_VERIFICATION', true, planned), 'TRUE');
+    test("ticks a check that came out in the operator's favour", () {
+      final badge = evidenceBadge('LOCATION_VERIFICATION', true, planned);
+      expect(badge.passed, isTrue);
+      expect(badge.detail, 'The network placed the device inside the zone.');
     });
 
-    test('keeps not collected for a planned check with no answer', () {
-      expect(evidenceLabel('SIM_SWAP', null, planned), 'NOT COLLECTED');
+    test('reads a swap check the right way round', () {
+      expect(evidenceBadge('SIM_SWAP', false, planned).passed, isTrue);
+      final swapped = evidenceBadge('SIM_SWAP', true, planned);
+      expect(swapped.passed, isFalse);
+      expect(swapped.detail, 'The SIM on this line was swapped recently.');
     });
 
-    test('tells an unrequested check from an unattestable one', () {
-      expect(evidenceLabel('REACHABILITY', null, planned), 'NOT REQUESTED');
+    test('an empty reading is neither ticked nor crossed, and says why', () {
       expect(
-        evidenceLabel('NUMBER_VERIFICATION', null, planned),
-        'CARRIER CANNOT ATTEST',
+        evidenceBadge('SIM_SWAP', null, planned).detail,
+        'Requested, but the carrier did not answer.',
       );
+      expect(
+        evidenceBadge('REACHABILITY', null, planned).detail,
+        'Not requested for this decision.',
+      );
+      final number = evidenceBadge('NUMBER_VERIFICATION', null, planned);
+      expect(number.passed, isNull);
+      expect(number.detail, 'The carrier cannot attest this over the network.');
     });
 
     test('does not guess without a plan', () {
-      expect(evidenceLabel('NUMBER_VERIFICATION', null, const []), 'NOT COLLECTED');
+      expect(
+        evidenceBadge('NUMBER_VERIFICATION', null, const []).detail,
+        'No result was recorded for this check.',
+      );
     });
   });
 
