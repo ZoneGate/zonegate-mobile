@@ -5,6 +5,7 @@ import '../services/zonegate_api.dart';
 import '../theme/app_colors.dart';
 import '../util/timestamps.dart';
 import '../widgets/status_badge.dart';
+import '../models/evidence_label.dart';
 
 /// The full record for one authorization, loaded from the backend.
 ///
@@ -202,24 +203,34 @@ class _ReceiptDetailViewState extends State<ReceiptDetailView> {
               children: [
                 _EvidenceRow(
                   label: 'Number verified',
+                  kind: 'NUMBER_VERIFICATION',
+                  planned: data.collectedEvidence,
                   state: evidence.numberVerified,
                 ),
                 _EvidenceRow(
                   label: 'Location verified',
+                  kind: 'LOCATION_VERIFICATION',
+                  planned: data.collectedEvidence,
                   state: evidence.locationVerified,
                 ),
                 _EvidenceRow(
                   label: 'Recent SIM swap',
+                  kind: 'SIM_SWAP',
+                  planned: data.collectedEvidence,
                   state: evidence.recentSimSwap,
                   invert: true,
                 ),
                 _EvidenceRow(
                   label: 'Recent device swap',
+                  kind: 'DEVICE_SWAP',
+                  planned: data.collectedEvidence,
                   state: evidence.recentDeviceSwap,
                   invert: true,
                 ),
                 _EvidenceRow(
                   label: 'Device reachable',
+                  kind: 'REACHABILITY',
+                  planned: data.collectedEvidence,
                   state: evidence.reachable,
                 ),
                 if (data.collectedEvidence.isNotEmpty) ...[
@@ -451,6 +462,8 @@ class _Row extends StatelessWidget {
 
 class _EvidenceRow extends StatelessWidget {
   final String label;
+  final String kind;
+  final List<String> planned;
   final bool? state;
 
   /// For swap checks a `true` reading is the bad outcome.
@@ -458,6 +471,8 @@ class _EvidenceRow extends StatelessWidget {
 
   const _EvidenceRow({
     required this.label,
+    required this.kind,
+    required this.planned,
     required this.state,
     this.invert = false,
   });
@@ -472,7 +487,7 @@ class _EvidenceRow extends StatelessWidget {
             ? AppColors.statusApproved
             : AppColors.statusBlocked;
 
-    final text = state == null ? 'NOT COLLECTED' : (state! ? 'TRUE' : 'FALSE');
+    final text = evidenceLabel(kind, state, planned);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
