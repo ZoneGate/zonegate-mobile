@@ -53,60 +53,85 @@ class _AgentProgressViewState extends State<AgentProgressView> {
   }
 
   void _run() {
-    _subscription = _api.streamAuthorization(widget.transaction).listen(
-      (event) {
-        if (!mounted) return;
+    _subscription = _api
+        .streamAuthorization(widget.transaction)
+        .listen(
+          (event) {
+            if (!mounted) return;
 
-        if (event is StageEvent) {
-          setState(() {
-            _stages = [
-              for (final row in _stages)
-                if (row.stage == event.stage)
-                  row.copyWith(status: event.status, detail: event.detail)
-                else
-                  row,
-            ];
-          });
-          return;
-        }
+            if (event is StageEvent) {
+              setState(() {
+                _stages = [
+                  for (final row in _stages)
+                    if (row.stage == event.stage)
+                      row.copyWith(status: event.status, detail: event.detail)
+                    else
+                      row,
+                ];
+              });
+              return;
+            }
 
-        if (event is AuthorizationResult) {
-          // The pipeline answered. Leave the finished stages on screen just
-          // long enough to be read, then hand over to the result screen.
-          Future<void>.delayed(const Duration(milliseconds: 550), () {
-            if (mounted) _goToResult(event.decision);
-          });
-        }
-      },
-      onError: (Object error) {
-        if (!mounted) return;
-        setState(() {
-          _error = error is ApiException
-              ? error.message
-              : 'The authorization pipeline could not be reached.';
-        });
-      },
-    );
+            if (event is AuthorizationResult) {
+              // The pipeline answered. Leave the finished stages on screen just
+              // long enough to be read, then hand over to the result screen.
+              Future<void>.delayed(const Duration(milliseconds: 550), () {
+                if (mounted) unawaited(_goToResult(event.decision));
+              });
+            }
+          },
+          onError: (Object error) {
+            if (!mounted) return;
+            setState(() {
+              _error = error is ApiException
+                  ? error.message
+                  : 'The authorization pipeline could not be reached.';
+            });
+          },
+        );
   }
 
-  void _goToResult(PolicyDecision decision) {
+  Future<void> _goToResult(PolicyDecision decision) async {
+    // The result screens say why a check is empty, which needs the evidence
+    // plan; the decision itself does not carry it. Without it the screens fall
+    // back to wording that guesses nothing.
+    var planned = const <String>[];
+    if (decision.decision != DecisionOutcome.hold) {
+      try {
+        planned = (await _api.decisionContext(
+          decision.decisionId,
+        )).collectedEvidence;
+      } on Object {
+        planned = const [];
+      }
+      if (!mounted) return;
+    }
+
     final Widget destination = switch (decision.decision) {
-      DecisionOutcome.approve => ApprovalResultView.fromDecision(decision),
+      DecisionOutcome.approve => ApprovalResultView.fromDecision(
+        decision,
+        planned: planned,
+      ),
       DecisionOutcome.deny => SecurityAlertView.fromDecision(
-          decision,
-          zone: widget.transaction.zone,
-        ),
-      DecisionOutcome.hold => ReceiptDetailView(decisionId: decision.decisionId),
+        decision,
+        zone: widget.transaction.zone,
+        planned: planned,
+      ),
+      DecisionOutcome.hold => ReceiptDetailView(
+        decisionId: decision.decisionId,
+      ),
     };
 
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => destination),
-    );
+    Navigator.of(
+      context,
+    ).pushReplacement(MaterialPageRoute(builder: (_) => destination));
   }
 
   @override
   Widget build(BuildContext context) {
-    final finished = _stages.where((row) => row.status != StageStatus.pending).length;
+    final finished = _stages
+        .where((row) => row.status != StageStatus.pending)
+        .length;
 
     return PopScope(
       // Backing out mid-pipeline would leave the operator with no idea whether
@@ -130,7 +155,10 @@ class _AgentProgressViewState extends State<AgentProgressView> {
             children: [
               Text(
                 widget.transaction.resourceId,
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
               const SizedBox(height: 4),
               Text(
@@ -148,7 +176,9 @@ class _AgentProgressViewState extends State<AgentProgressView> {
                   value: finished / pipelineOrder.length,
                   minHeight: 5,
                   backgroundColor: AppColors.innerFill,
-                  valueColor: const AlwaysStoppedAnimation(AppColors.primaryTeal),
+                  valueColor: const AlwaysStoppedAnimation(
+                    AppColors.primaryTeal,
+                  ),
                 ),
               ),
               const SizedBox(height: 18),
@@ -223,17 +253,25 @@ class _StageRow extends StatelessWidget {
 
     final Widget marker = switch (status) {
       StageStatus.started => const SizedBox(
-          width: 18,
-          height: 18,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            color: AppColors.primaryTeal,
-          ),
+        width: 18,
+        height: 18,
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          color: AppColors.primaryTeal,
         ),
+      ),
       StageStatus.done => Icon(Icons.check_circle, size: 20, color: colour),
       StageStatus.failed => Icon(Icons.cancel, size: 20, color: colour),
-      StageStatus.skipped => Icon(Icons.remove_circle_outline, size: 20, color: colour),
-      StageStatus.pending => Icon(Icons.circle_outlined, size: 20, color: colour),
+      StageStatus.skipped => Icon(
+        Icons.remove_circle_outline,
+        size: 20,
+        color: colour,
+      ),
+      StageStatus.pending => Icon(
+        Icons.circle_outlined,
+        size: 20,
+        color: colour,
+      ),
     };
 
     return Padding(

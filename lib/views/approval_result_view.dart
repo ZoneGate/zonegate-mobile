@@ -37,16 +37,21 @@ class ApprovalResultView extends StatelessWidget {
   /// The checks are the canonical evidence the Gateway collected, not a
   /// hard-coded list: an item the planner never requested reads as not
   /// collected rather than silently reading as a pass.
-  factory ApprovalResultView.fromDecision(PolicyDecision decision) {
+  factory ApprovalResultView.fromDecision(
+    PolicyDecision decision, {
+    List<String> planned = const [],
+  }) {
     final evidence = decision.evidenceSummary;
 
     return ApprovalResultView(
       authorizationRef: decision.transactionId,
       decisionId: decision.decisionId,
-      policy: decision.reasons.isEmpty ? 'DETERMINISTIC POLICY' : decision.reasons.first,
+      policy: decision.reasons.isEmpty
+          ? 'DETERMINISTIC POLICY'
+          : decision.reasons.first,
       source: decision.resolution == null ? 'AUTOMATIC' : 'AUTHORIZED HUMAN',
       caveats: decision.reasons.skip(1).toList(),
-      checks: evidenceChecksFrom(evidence),
+      checks: evidenceChecksFrom(evidence, planned: planned),
     );
   }
 

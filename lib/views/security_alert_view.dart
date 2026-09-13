@@ -35,6 +35,7 @@ class SecurityAlertView extends StatelessWidget {
   factory SecurityAlertView.fromDecision(
     PolicyDecision decision, {
     String? zone,
+    List<String> planned = const [],
   }) {
     final evidence = decision.evidenceSummary;
     final reason = decision.reasons.isEmpty ? '' : decision.reasons.first;
@@ -45,20 +46,20 @@ class SecurityAlertView extends StatelessWidget {
     final title = locationFailed
         ? 'Presence Attack Detected'
         : numberFailed
-            ? 'Subscriber Identity Mismatch'
-            : 'Authorization Blocked';
+        ? 'Subscriber Identity Mismatch'
+        : 'Authorization Blocked';
 
     final reasonCode = locationFailed
         ? 'ACCOUNT AUTH VALID — NETWORK LOCATION EVIDENCE INVALID'
         : numberFailed
-            ? 'REGISTERED NUMBER DID NOT MATCH THE CARRIER RECORD'
-            : reason.toUpperCase();
+        ? 'REGISTERED NUMBER DID NOT MATCH THE CARRIER RECORD'
+        : reason.toUpperCase();
 
     return SecurityAlertView(
       badgeLabel: 'BLOCKED',
       title: title,
       reasonCode: reasonCode,
-      checks: evidenceChecksFrom(evidence),
+      checks: evidenceChecksFrom(evidence, planned: planned),
       requiredZoneNote: locationFailed
           ? 'This action requires the enrolled device to be present at'
           : 'Blocked at the policy layer for',
